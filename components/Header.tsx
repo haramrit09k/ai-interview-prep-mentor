@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { UserProfile } from '../types';
 import { BrainCircuitIcon, LogoutIcon } from './Icons';
 import { GoogleLogin } from '@react-oauth/google';
@@ -16,7 +16,14 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onPurchaseQuestions }) => {
     const showQuotaWarning = isAuthenticated && questionsRemaining <= 10;
-    const questionsToBuy = 100; // Default quantity for header button
+
+    const purchaseOptions = [
+        { quantity: 10, priceCents: 20 },   // 10 questions for $0.20
+        { quantity: 50, priceCents: 80 },   // 50 questions for $0.80
+        { quantity: 100, priceCents: 150 }, // 100 questions for $1.50
+    ];
+
+    const [selectedQuantity, setSelectedQuantity] = useState(purchaseOptions[0].quantity);
 
     return (
         <header className="bg-background-medium/80 backdrop-blur-sm sticky top-0 z-40 border-b border-background-light">
@@ -33,12 +40,27 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                             </span>
                         )}
                         {isAuthenticated && (
-                            <button
-                                onClick={() => onPurchaseQuestions(questionsToBuy)}
-                                className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-sm"
-                            >
-                                Buy More Questions
-                            </button>
+                            <div className="relative group">
+                                <button
+                                    className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-sm"
+                                >
+                                    Buy More Questions
+                                </button>
+                                <div className="absolute right-0 mt-2 w-48 bg-background-medium rounded-md shadow-lg py-1 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 transform origin-top-right">
+                                    {purchaseOptions.map(option => (
+                                        <button
+                                            key={option.quantity}
+                                            onClick={() => {
+                                                setSelectedQuantity(option.quantity);
+                                                onPurchaseQuestions(option.quantity);
+                                            }}
+                                            className="block w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-background-light"
+                                        >
+                                            {option.quantity} Questions (${(option.priceCents / 100).toFixed(2)})
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                         )}
                         {isAuthEnabled ? (
                             userProfile ? (
