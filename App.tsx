@@ -31,7 +31,7 @@ const RATING_CHANGE: Record<AnswerOutcome, number> = {
 const SESSIONS_LIMIT_ANON = 2;
 const SKILLS_LIMIT_ANON = 2;
 const SKILLS_LIMIT_AUTH = 5;
-const QUESTIONS_LIMIT_AUTH = -190;
+const QUESTIONS_LIMIT_AUTH = 20;
 
 // --- STABLE EMPTY ARRAY REFERENCES TO PREVENT RE-RENDERS ---
 const EMPTY_SKILLS: Skill[] = [];
