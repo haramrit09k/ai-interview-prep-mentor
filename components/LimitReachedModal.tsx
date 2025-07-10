@@ -1,0 +1,124 @@
+
+import React, { useState } from 'react';
+import { XIcon } from './Icons';
+
+interface LimitReachedModalProps {
+  onClose: () => void;
+  onUpgrade: (quantity: number) => void; // Now accepts quantity
+  reason: 'skills' | 'sessions' | 'quota';
+}
+
+export const LimitReachedModal: React.FC<LimitReachedModalProps> = ({ onClose, onUpgrade, reason }) => {
+  const messages = {
+    skills: {
+      title: 'Skill Limit Reached!',
+      body: 'To keep this service available for everyone, anonymous users are limited to <strong>2 skills</strong>.',
+      upgrade: false,
+    },
+    sessions: {
+      title: 'Practice Limit Reached!',
+      body: 'To keep this service available for everyone, anonymous users are limited to <strong>2 practice sessions</strong>.',
+      upgrade: false,
+    },
+    quota: {
+      title: "Great work! You've hit your daily practice limit.",
+      body: 'To continue with your interview and unlock unlimited practice sessions, please upgrade.',
+      upgrade: true,
+    }
+  };
+
+  const currentMessage = messages[reason];
+
+  // Options for purchasing questions
+  const purchaseOptions = [
+    { quantity: 10, priceCents: 20 },   // 10 questions for $0.20
+    { quantity: 50, priceCents: 80 },   // 50 questions for $0.80
+    { quantity: 100, priceCents: 150 }, // 100 questions for $1.50
+  ];
+
+  const [selectedOption, setSelectedOption] = useState(purchaseOptions[0]);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4" aria-modal="true" role="dialog">
+      <div className="bg-background-medium rounded-xl shadow-2xl w-full max-w-lg border border-background-light transform transition-all duration-300 scale-95 hover:scale-100">
+        <div className="p-8 relative">
+          <button onClick={onClose} className="absolute top-4 right-4 text-text-muted hover:text-text-primary transition-colors" aria-label="Close">
+            <XIcon className="w-6 h-6" />
+          </button>
+          <h2 className="text-2xl font-bold text-brand-light mb-4">{currentMessage.title}</h2>
+          <div className="text-text-secondary space-y-4">
+            <p dangerouslySetInnerHTML={{ __html: currentMessage.body }} />
+            {currentMessage.upgrade && (
+              <div className="space-y-2">
+                <p>Choose your question pack:</p>
+                <div className="flex flex-wrap gap-3">
+                  {purchaseOptions.map(option => (
+                    <button
+                      key={option.quantity}
+                      type="button"
+                      onClick={() => setSelectedOption(option)}
+                      className={`py-2 px-4 rounded-lg font-semibold transition-colors
+                        ${selectedOption.quantity === option.quantity
+                          ? 'bg-brand-primary text-white ring-2 ring-brand-light'
+                          : 'bg-background-light hover:bg-gray-600 text-text-primary'
+                        }`}
+                    >
+                      {option.quantity} Questions (${(option.priceCents / 100).toFixed(2)})
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!currentMessage.upgrade && (
+              <>
+                <p>
+                  For unlimited access, you can run this application on your own computer. It's free and open-source!
+                </p>
+                <p>
+                  Just clone the repository from GitHub, add your own Google Gemini API key, and you'll have your own personal, unrestricted interview mentor.
+                </p>
+              </>
+            )}
+          </div>
+          <div className="mt-8 flex flex-col sm:flex-row gap-4">
+            {currentMessage.upgrade ? (
+              <>
+                <button
+                  onClick={() => onUpgrade(selectedOption.quantity)}
+                  className="flex-1 text-center py-3 px-5 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors"
+                >
+                  Buy {selectedOption.quantity} Questions (${(selectedOption.priceCents / 100).toFixed(2)}) & Continue
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 sm:flex-none py-3 px-5 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors"
+                >
+                  End Session & View Summary
+                </button>
+              </>
+            ) : (
+              <>
+                <a
+                  href="https://github.com/your-username/your-repo-name" // Replace with your actual repo URL
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 text-center py-3 px-5 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors"
+                >
+                  Go to GitHub
+                </a>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 sm:flex-none py-3 px-5 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors"
+                >
+                  Got it
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

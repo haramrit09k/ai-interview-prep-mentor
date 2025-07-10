@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Interview Prep Mentor</title>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'brand': {
+                'primary': '#4f46e5',
+                'secondary': '#7c3aed',
+                'light': '#6366f1',
+                'dark': '#3730a3',
+              },
+              'background': {
+                'dark': '#111827',
+                'medium': '#1f2937',
+                'light': '#374151',
+              },
+              'text': {
+                'primary': '#f9fafb',
+                'secondary': '#d1d5db',
+                'muted': '#9ca3af',
+              }
+            },
+            // The prose classes in PracticeView.tsx use this config for styling.
+            typography: ({ theme }) => ({
+              invert: {
+                css: {
+                  '--tw-prose-body': theme('colors.text.secondary'),
+                  '--tw-prose-headings': theme('colors.text.primary'),
+                  '--tw-prose-links': theme('colors.brand.light'),
+                  '--tw-prose-bold': theme('colors.text.primary'),
+                  '--tw-prose-hr': theme('colors.background.light'),
+                  '--tw-prose-quotes': theme('colors.text.primary'),
+                  '--tw-prose-quote-borders': theme('colors.brand.dark'),
+                  '--tw-prose-code': theme('colors.text.primary'),
+                  '--tw-prose-pre-code': theme('colors.text.secondary'),
+                  '--tw-prose-pre-bg': theme('colors.background.dark'),
+                },
+              },
+            }),
+          },
+        },
+      };
+    </script>
+  <!-- <script type="importmap">
+
+</script> -->
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-background-dark">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
