@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { UserProfile } from '../types';
-import { BrainCircuitIcon, LogoutIcon } from './Icons';
+import { LogoutIcon } from './Icons';
+import { BrainIcon } from './BrainIcon';
 import { GoogleLogin } from '@react-oauth/google';
 
 
@@ -30,7 +31,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex items-center justify-between h-16">
                     <div className="flex items-center">
-                        <BrainCircuitIcon className="h-8 w-8 text-brand-primary" />
+                        <BrainIcon className="h-8 w-8 text-brand-primary" />
                         <h1 className="text-xl font-bold text-text-primary ml-3 tracking-tight">AI Interview Mentor</h1>
                     </div>
                     <div className="flex items-center gap-4">
