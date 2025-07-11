@@ -35,7 +35,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                         <h1 className="text-xl font-bold text-text-primary ml-3 tracking-tight">ACE: AI Coach for Employment</h1>
                     </div>
                     <div className="flex items-center gap-4">
-                        {showQuotaWarning && (
+                        {isAuthenticated && (
                             <span className="text-sm text-yellow-400 font-semibold">
                                 {questionsRemaining} Questions Left!
                             </span>
