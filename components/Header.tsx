@@ -97,7 +97,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                                 <GoogleLogin
                                     onSuccess={onLoginSuccess}
                                     onError={() => {
-                                        console.log('Login Failed');
+                                        
                                         alert('Google login failed. Please try again.');
                                     }}
                                     theme="filled_black"

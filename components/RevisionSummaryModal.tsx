@@ -15,35 +15,24 @@ const RevisionSummaryModal: React.FC<RevisionSummaryModalProps> = ({ skill, answ
   const [aggregatedConcepts, setAggregatedConcepts] = useState<{ known: string[]; review: string[]; } | null>(null);
 
   useEffect(() => {
-    console.log("RevisionSummaryModal: useEffect triggered.");
-    console.log("RevisionSummaryModal: skill.id", skill.id);
-    console.log("RevisionSummaryModal: answerHistory", answerHistory);
-
     setIsLoading(true);
     const relevantHistory = answerHistory.filter(h => h.skillId === skill.id);
-    console.log("RevisionSummaryModal: relevantHistory", relevantHistory);
 
     const known: Set<string> = new Set();
     const review: Set<string> = new Set();
 
     relevantHistory.forEach(entry => {
-      console.log("Processing history entry:", entry);
       entry.conceptsKnown?.forEach(concept => {
         known.add(concept);
-        console.log("Added to known:", concept);
       });
       entry.conceptsToReview?.forEach(concept => {
         review.add(concept);
-        console.log("Added to review:", concept);
       });
     });
 
     // Filter out concepts that are in both known and review (prioritize review if ambiguous)
     const finalKnown = Array.from(known).filter(concept => !review.has(concept));
     const finalReview = Array.from(review);
-
-    console.log("RevisionSummaryModal: finalKnown", finalKnown);
-    console.log("RevisionSummaryModal: finalReview", finalReview);
 
     setAggregatedConcepts({ known: finalKnown, review: finalReview });
     setIsLoading(false);
