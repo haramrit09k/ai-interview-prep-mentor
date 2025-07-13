@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { UserProfile } from '../types';
-import { LogoutIcon } from './Icons';
+import { LogoutIcon, QuestionMarkCircleIcon } from './Icons';
 import { BrainIcon } from './BrainIcon';
 import { GoogleLogin } from '@react-oauth/google';
 
@@ -13,9 +13,10 @@ interface HeaderProps {
     questionsRemaining: number; // New prop
     isAuthenticated: boolean; // New prop
     onPurchaseQuestions: (quantity: number) => void; // New prop
+    onOpenWelcomeModal: () => void; // New prop for opening welcome modal
 }
 
-const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onPurchaseQuestions }) => {
+const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onPurchaseQuestions, onOpenWelcomeModal }) => {
     const showQuotaWarning = isAuthenticated && questionsRemaining <= 10;
 
     const purchaseOptions = [
@@ -35,6 +36,16 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                         <h1 className="text-xl font-bold text-text-primary ml-3 tracking-tight">ACE: AI Coach for Employment</h1>
                     </div>
                     <div className="flex items-center gap-4">
+                        <div className="relative group">
+                            <button
+                                onClick={onOpenWelcomeModal}
+                                className="p-2 rounded-full text-text-secondary hover:bg-background-light hover:text-text-primary transition-colors"
+                                aria-label="Open help and instructions"
+                                title="Help & Instructions"
+                            >
+                                <QuestionMarkCircleIcon className="w-6 h-6" />
+                            </button>
+                        </div>
                         {isAuthenticated && (
                             <span className="text-sm text-yellow-400 font-semibold">
                                 {questionsRemaining} Questions Left!
