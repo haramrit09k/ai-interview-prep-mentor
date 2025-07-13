@@ -60,14 +60,14 @@ const RevisionSummaryModal: React.FC<RevisionSummaryModalProps> = ({ skill, answ
       return (
         <div className="space-y-8">
           <div>
-            <h3 className="text-xl font-bold text-brand-light mb-3">Concepts You Knew</h3>
-            <div className="bg-background-dark/50 p-4 rounded-lg">
+            <h3 className="text-lg font-bold text-brand-light mb-2">Concepts You Knew</h3>
+            <div className="bg-background-dark/50 p-3 rounded-lg text-sm">
               <MarkdownRenderer content={knownContent} />
             </div>
           </div>
           <div>
-            <h3 className="text-xl font-bold text-yellow-400 mb-3">Concepts to Review</h3>
-            <div className="bg-background-dark/50 p-4 rounded-lg">
+            <h3 className="text-lg font-bold text-yellow-400 mb-2">Concepts to Review</h3>
+            <div className="bg-background-dark/50 p-3 rounded-lg text-sm">
               <MarkdownRenderer content={reviewContent} />
             </div>
           </div>
@@ -80,7 +80,7 @@ const RevisionSummaryModal: React.FC<RevisionSummaryModalProps> = ({ skill, answ
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4" aria-modal="true" role="dialog">
       <div className="bg-background-medium rounded-xl shadow-2xl w-full max-w-3xl border border-background-light transform transition-all duration-300 scale-95 hover:scale-100">
-        <div className="p-6 md:p-8 relative">
+        <div className="p-4 sm:p-6 md:p-8 relative">
           <button onClick={onClose} className="absolute top-4 right-4 text-text-muted hover:text-text-primary transition-colors" aria-label="Close">
             <XIcon className="w-6 h-6" />
           </button>

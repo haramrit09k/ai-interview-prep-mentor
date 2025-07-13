@@ -26,24 +26,24 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ skills, onClo
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
-      <div className="bg-background-medium rounded-xl shadow-2xl w-full max-w-2xl border border-background-light transform transition-all duration-300 scale-95 hover:scale-100">
-        <div className="p-6 relative">
-          <button onClick={onClose} className="absolute top-4 right-4 text-text-muted hover:text-text-primary transition-colors">
-            <XIcon className="w-6 h-6" />
+      <div className="bg-background-medium rounded-xl shadow-2xl w-full max-w-md mx-auto border border-background-light">
+        <div className="p-4 sm:p-6 relative">
+          <button onClick={onClose} className="absolute top-3 right-3 text-text-muted hover:text-text-primary transition-colors">
+            <XIcon className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
-          <h2 className="text-2xl font-bold text-text-primary mb-4">Add a Custom Question</h2>
-          <p className="text-text-secondary mb-6">Add questions you've encountered or want to practice specifically.</p>
+          <h2 className="text-xl sm:text-2xl font-bold text-text-primary mb-3 sm:mb-4">Add a Custom Question</h2>
+          <p className="text-text-secondary text-sm sm:text-base mb-4 sm:mb-6">Add questions you've encountered or want to practice specifically.</p>
           
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
             <div>
-              <label htmlFor="skill" className="block text-sm font-medium text-text-secondary mb-2">
+              <label htmlFor="skill" className="block text-xs sm:text-sm font-medium text-text-secondary mb-1 sm:mb-2">
                 Skill / Topic
               </label>
               <select
                 id="skill"
                 value={selectedSkill}
                 onChange={(e) => setSelectedSkill(e.target.value)}
-                className="w-full bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-3"
+                className="w-full bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-2 sm:p-3 text-sm sm:text-base"
               >
                 {skills.length > 0 ? (
                     skills.map(skill => (
@@ -56,7 +56,7 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ skills, onClo
             </div>
             
             <div>
-              <label htmlFor="question" className="block text-sm font-medium text-text-secondary mb-2">
+              <label htmlFor="question" className="block text-xs sm:text-sm font-medium text-text-secondary mb-1 sm:mb-2">
                 Question
               </label>
               <textarea
@@ -65,12 +65,12 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ skills, onClo
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 placeholder="e.g., Explain the difference between useEffect and useLayoutEffect."
-                className="w-full bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-3"
+                className="w-full bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-2 sm:p-3 text-sm sm:text-base"
               />
             </div>
 
             <div>
-              <label htmlFor="answer" className="block text-sm font-medium text-text-secondary mb-2">
+              <label htmlFor="answer" className="block text-xs sm:text-sm font-medium text-text-secondary mb-1 sm:mb-2">
                 Your Ideal Answer
               </label>
               <textarea
@@ -79,22 +79,22 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ skills, onClo
                 value={answer}
                 onChange={(e) => setAnswer(e.target.value)}
                 placeholder="Provide a detailed, well-structured answer you want to practice."
-                className="w-full bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-3"
+                className="w-full bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-2 sm:p-3 text-sm sm:text-base"
               />
             </div>
 
-            <div className="flex justify-end gap-4 pt-4">
+            <div className="flex flex-col sm:flex-row justify-end gap-3 sm:gap-4 pt-2 sm:pt-4">
               <button
                 type="button"
                 onClick={onClose}
-                className="py-2 px-5 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors"
+                className="py-2 px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors text-sm sm:text-base"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={skills.length === 0}
-                className="py-2 px-5 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors"
+                className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
               >
                 Add Question
               </button>

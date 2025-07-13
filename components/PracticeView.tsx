@@ -108,14 +108,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
       return (
         <div className="space-y-6">
           <div>
-            <h3 className="text-xl font-bold text-brand-light mb-2">Feedback on Your Answer</h3>
-            <div className="bg-background-dark/50 p-4 rounded-lg">
+            <h3 className="text-lg sm:text-xl font-bold text-brand-light mb-2">Feedback on Your Answer</h3>
+            <div className="bg-background-dark/50 p-3 sm:p-4 rounded-lg text-sm sm:text-base">
                 <MarkdownRenderer content={feedback} />
             </div>
           </div>
           <div>
-            <h3 className="text-xl font-bold text-text-primary mb-2">Mentor's Answer</h3>
-            <div className="bg-background-dark/50 p-4 rounded-lg">
+            <h3 className="text-lg sm:text-xl font-bold text-text-primary mb-2">Mentor's Answer</h3>
+            <div className="bg-background-dark/50 p-3 sm:p-4 rounded-lg text-sm sm:text-base">
                 <MarkdownRenderer content={mentorAnswer} />
             </div>
           </div>
@@ -165,7 +165,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
           onUpgrade={handleUpgrade} 
         />
       )}
-      <div className="min-h-screen flex flex-col p-4 md:p-8">
+      <div className="min-h-screen flex flex-col p-4 sm:p-8">
         <header className="w-full max-w-5xl mx-auto flex justify-between items-center mb-6">
           <div>
             <h1 className="text-2xl font-bold text-text-primary">Practice: {session.skill.name}</h1>
@@ -180,7 +180,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
         </header>
 
         <main className="flex-grow flex items-center justify-center">
-          <div className="w-full max-w-5xl bg-background-medium rounded-xl shadow-2xl p-6 md:p-10 border border-background-light">
+          <div className="w-full max-w-5xl bg-background-medium rounded-xl shadow-2xl p-6 sm:p-10 border border-background-light">
             <div className="mb-8">
               <p className="text-sm font-semibold text-brand-light mb-2">
                 {currentQuestion.source === 'custom' ? 'Your Custom Question' : 'AI-Generated Question'}
@@ -192,18 +192,18 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
               {renderContent()}
             </div>
             
-            <div className="flex justify-between items-center mt-6 pt-6 border-background-light">
+            <div className="flex flex-col sm:flex-row justify-between items-center mt-6 pt-6 border-t border-background-light">
               <button
                 onClick={() => onNavigate('prev')}
                 disabled={session.currentQuestionIndex === 0}
-                className="flex items-center gap-2 py-2 px-4 rounded-md text-text-secondary hover:text-text-primary hover:bg-background-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center gap-2 py-2 px-4 rounded-md text-text-secondary hover:text-text-primary hover:bg-background-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto justify-center"
               >
                 <ChevronLeftIcon /> Previous
               </button>
               <button
                 onClick={() => onNavigate('next')}
                 disabled={session.currentQuestionIndex === session.questions.length - 1}
-                className="flex items-center gap-2 py-2 px-4 rounded-md text-text-secondary hover:text-text-primary hover:bg-background-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center gap-2 py-2 px-4 rounded-md text-text-secondary hover:text-text-primary hover:bg-background-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto justify-center"
               >
                 Next <ChevronRightIcon />
               </button>

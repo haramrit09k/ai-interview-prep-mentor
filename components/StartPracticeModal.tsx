@@ -45,26 +45,26 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4" aria-modal="true" role="dialog">
-      <div className="bg-background-medium rounded-xl shadow-2xl w-full max-w-lg border border-background-light transform transition-all duration-300 scale-95 hover:scale-100">
-        <div className="p-6 relative">
-          <button onClick={onClose} className="absolute top-4 right-4 text-text-muted hover:text-text-primary transition-colors" aria-label="Close">
-            <XIcon className="w-6 h-6" />
+      <div className="bg-background-medium rounded-xl shadow-2xl w-full max-w-md border border-background-light">
+        <div className="p-4 relative">
+          <button onClick={onClose} className="absolute top-3 right-3 text-text-muted hover:text-text-primary transition-colors" aria-label="Close">
+            <XIcon className="w-5 h-5" />
           </button>
-          <h2 className="text-2xl font-bold text-text-primary mb-2">Practice: {skill.name}</h2>
-          <p className="text-text-secondary mb-6">Customize your practice session.</p>
+          <h2 className="text-xl font-bold text-text-primary mb-2">Practice: {skill.name}</h2>
+          <p className="text-text-secondary text-sm mb-6">Customize your practice session.</p>
           
-          <form onSubmit={handleSubmit} className="space-y-8">
+          <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-3">
+              <label className="block text-sm font-medium text-text-secondary mb-2">
                 Experience Level
               </label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-2">
                 {levels.map(l => (
                   <button
                     type="button"
                     key={l}
                     onClick={() => setLevel(l)}
-                    className={`py-3 px-2 rounded-lg text-sm font-semibold transition-all text-center ${getButtonClass(level === l)}`}
+                    className={`py-2 px-2 rounded-lg text-sm font-semibold transition-all text-center ${getButtonClass(level === l)}`}
                   >
                     {l}
                   </button>
@@ -73,7 +73,7 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
             </div>
             
             <div>
-              <div className="flex justify-between items-baseline mb-3">
+              <div className="flex justify-between items-baseline mb-2">
                 <label className="block text-sm font-medium text-text-secondary">
                   Number of Questions
                 </label>
@@ -87,7 +87,7 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
                   </span>
                 )}
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-2">
                  {counts.map(c => {
                   const isDisabled = false; // Allow users to start any session length
 
@@ -97,7 +97,7 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
                       key={c}
                       onClick={() => !isDisabled && setCount(c)}
                       disabled={isDisabled}
-                      className={`py-3 px-2 rounded-lg text-sm font-semibold transition-all ${getButtonClass(count === c, isDisabled)}`}
+                      className={`py-2 px-2 rounded-lg text-sm font-semibold transition-all ${getButtonClass(count === c, isDisabled)}`}
                     >
                       {c} Questions
                     </button>
@@ -106,22 +106,22 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
               </div>
             </div>
 
-            <div className="flex justify-end gap-4 pt-4">
+            <div className="flex flex-col sm:flex-row justify-end gap-3 pt-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="py-2 px-5 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors"
+                className="py-2 px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors text-sm"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isStarting}
-                className="w-48 flex justify-center items-center py-2 px-5 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors"
+                className="w-full sm:w-48 flex justify-center items-center py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors text-sm"
               >
                 {isStarting ? (
                   <>
-                    <SpinnerIcon className="w-5 h-5 mr-2 border-2" />
+                    <SpinnerIcon className="w-4 h-4 mr-2 border-2" />
                     Starting...
                   </>
                 ) : (
