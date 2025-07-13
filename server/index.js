@@ -193,6 +193,17 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+// Endpoint for frontend logging
+app.post('/api/log', express.json(), (req, res) => {
+  const { level, message, context } = req.body;
+  if (logger[level]) {
+    logger[level](`[FRONTEND] ${message}`, context);
+  } else {
+    logger.info(`[FRONTEND] ${message}`, context); // Default to info if level is unknown
+  }
+  res.status(200).send('Log received');
+});
+
 app.listen(PORT, () => {
   logger.info(`Server listening on port ${PORT}`);
 });
