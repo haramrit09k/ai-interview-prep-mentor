@@ -1,5 +1,13 @@
 # Run and deploy your AI Studio app
 
+## Quick Start (TLDR)
+
+1.  **Install dependencies**: Run `npm install` in the project root.
+2.  **Configure API Key**: Create a `.env.local` file in the project root and add your Gemini API key: `GEMINI_API_KEY=YOUR_API_KEY_HERE`.
+3.  **Start Frontend**: In your first terminal, navigate to the project root and run `npm run dev`.
+4.  **Start Backend**: In a second terminal, navigate to the project root and run `npm start`.
+
+
 This contains everything you need to run your app locally.
 
 ## Run Locally
