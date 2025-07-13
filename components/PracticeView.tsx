@@ -51,10 +51,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
       setMentorAnswer(answer);
       setFeedback("That's okay! The first step to learning is identifying what you don't know. Review the mentor's answer below.");
     } else {
-      const { mentorAnswer, feedback, classification } = await evaluateAnswer(currentQuestion.text, userAnswer);
+      const { mentorAnswer, feedback, classification, conceptsKnown, conceptsToReview } = await evaluateAnswer(currentQuestion.text, userAnswer);
       setMentorAnswer(mentorAnswer);
       setFeedback(feedback);
-      onQuestionComplete({ question: currentQuestion, classification });
+      onQuestionComplete({ question: currentQuestion, classification, conceptsKnown, conceptsToReview });
     }
 
     setIsSubmitting(false);
