@@ -7,13 +7,13 @@ async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
     logger.warn('authMiddleware: Authorization header missing.');
-    return res.status(401).send('Authorization header missing');
+    return res.status(401).json({ error: 'Authorization header missing' });
   }
 
   const token = authHeader.split(' ')[1];
   if (!token) {
     logger.warn('authMiddleware: Token missing.');
-    return res.status(401).send('Token missing');
+    return res.status(401).json({ error: 'Token missing' });
   }
 
   try {
@@ -28,7 +28,7 @@ async function authMiddleware(req, res, next) {
     next();
   } catch (error) {
     logger.error('authMiddleware: Error verifying token', error);
-    res.status(401).send('Invalid token');
+    res.status(401).json({ error: 'Invalid token' });
   }
 }
 
