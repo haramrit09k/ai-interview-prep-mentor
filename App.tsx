@@ -11,6 +11,7 @@ import Header from './components/Header';
 import { LimitReachedModal } from './components/LimitReachedModal';
 import { WelcomeModal } from './components/WelcomeModal';
 import { SpinnerIcon } from './components/Icons';
+import ToastNotification from './components/ToastNotification';
 import { v4 as uuidv4 } from 'uuid';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
@@ -77,6 +78,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const [hasSeenWelcomeModal, setHasSeenWelcomeModal] = useLocalStorage<boolean>('interview_prep_seen_welcome_modal', false);
   const [hasSeenWelcomeModalAuth, setHasSeenWelcomeModalAuth] = useState<boolean | null>(null);
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   
   const [authQuota, setAuthQuota] = useState<AuthQuota>({ questionsUsed: 0, lastResetDate: new Date().toISOString().split('T')[0] });
 
@@ -150,6 +152,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         setUserProfile(profile);
         // Store the ID token for backend calls
         localStorage.setItem('google_id_token', credentialResponse.credential);
+        setToastMessage('Successfully logged in!');
     } catch (error) {
         console.error("Error decoding JWT:", error);
         alert("Failed to process login information.");
@@ -161,7 +164,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       setUserProfile(null);
       localStorage.removeItem('google_id_token'); // Clear the ID token on logout
       logger.info('User logged out.');
-      alert('Your session has expired. Please log in again.');
+      setToastMessage('Successfully logged out!');
     }
   }, [isAuthEnabled, setUserProfile]);
 
@@ -494,6 +497,9 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             setHasSeenWelcomeModal(true);
           }
         }} />
+      )}
+      {toastMessage && (
+        <ToastNotification message={toastMessage} onClose={() => setToastMessage(null)} />
       )}
     </div>
   );
