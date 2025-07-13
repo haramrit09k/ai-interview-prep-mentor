@@ -61,4 +61,12 @@ db.query(createTableSql)
   .then(() => console.log('Users table checked/created'))
   .catch(err => console.error('Error creating users table', err));
 
+// Add has_seen_welcome_modal column if it doesn't exist
+db.query(`
+  ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS has_seen_welcome_modal BOOLEAN DEFAULT FALSE;
+`)
+  .then(() => console.log('Added has_seen_welcome_modal column to users table if not exists'))
+  .catch(err => console.error('Error adding has_seen_welcome_modal column', err));
+
 module.exports = db;
