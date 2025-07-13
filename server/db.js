@@ -93,3 +93,19 @@ db.query(`
   .catch(err => logger.error('Error adding has_seen_welcome_modal column', err));
 
 module.exports = db;
+
+// Add unanswered_questions column if it doesn't exist
+db.query(`
+  ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS unanswered_questions TEXT;
+`)
+  .then(() => logger.info('Added unanswered_questions column to users table if not exists'))
+  .catch(err => logger.error('Error adding unanswered_questions column', err));
+
+// Add unanswered_questions column if it doesn't exist
+db.query(`
+  ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS unanswered_questions TEXT;
+`)
+  .then(() => logger.info('Added unanswered_questions column to users table if not exists'))
+  .catch(err => logger.error('Error adding unanswered_questions column', err));

@@ -1,6 +1,5 @@
-
 import { GoogleGenAI, Type, GenerateContentResponse, HarmCategory, HarmBlockThreshold } from "@google/genai";
-import type { EvaluationResponse, ExperienceLevel } from '../types';
+import type { EvaluationResponse } from '../types';
 import logger from '../src/logger'; // Import the logger
 
 const API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -31,102 +30,10 @@ const cleanJsonString = (str: string): string => {
   return cleaned.trim();
 };
 
-export const generateQuestionsForSkill = async (skillName: string, level: ExperienceLevel, count: number): Promise<string[]> => {
-  try {
-    let levelSpecificInstructions = '';
-
-    switch (level) {
-      case 'Entry-level':
-        levelSpecificInstructions = `
-          The user is a beginner. Ask fundamental, definition-based questions.
-          - Focus on core concepts, syntax, and basic principles.
-          - For a topic like 'Java', examples would be "What are the core principles of OOP?", "What is the difference between == and equals()?", or "What are checked vs. unchecked exceptions?".
-          - The questions should be straightforward and test foundational knowledge. Avoid complex, multi-part scenarios.
-        `;
-        break;
-      case 'Mid-level':
-        levelSpecificInstructions = `
-          The user has some industry experience. Ask practical questions that require applying concepts.
-          - Focus on use cases, comparisons between technologies, and simple problem-solving or code analysis.
-          - For a topic like 'Java', examples would be "When would you prefer using a LinkedList over an ArrayList and why?", "How would you ensure a method is thread-safe?", or asking them to find a bug in a small code snippet.
-          - The questions should bridge the gap between pure definition and complex design.
-        `;
-        break;
-      case 'Expert':
-        levelSpecificInstructions = `
-          The user is a seasoned expert. Ask advanced, real-world, and scenario-based questions.
-          - Focus on system design, architecture, performance trade-offs, and handling complex problems at scale.
-          - For a topic like 'Java', an example would be "Imagine you need to fetch data from multiple web APIs concurrently. How would you approach this using basic concurrency features?".
-          - The questions should test deep knowledge and experience.
-        `;
-        break;
-    }
-    
-    const contents = `You are an expert interviewer with a mentoring approach. Your goal is to help an engineer prepare for an interview for the topic: "${skillName}".
-
-Generate exactly ${count} interview questions appropriate for a candidate at the "${level}" experience level.
-
-Follow these specific instructions for the experience level:
-${levelSpecificInstructions}
-`;
-
-    const response: GenerateContentResponse = await ai.models.generateContent({
-      model: model,
-      contents: contents,
-      config: {
-        responseMimeType: "application/json",
-        maxOutputTokens: 1500,
-        safetySettings: [
-          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        ],
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            questions: {
-              type: Type.ARRAY,
-              description: `A list of ${count} interview questions for a ${level} candidate.`,
-              items: { type: Type.STRING, description: "An interview question." }
-            }
-          },
-          required: ["questions"]
-        }
-      }
-    });
-    
-    logger.debug('Gemini API response for questions:', response);
-
-    const jsonStr = cleanJsonString(response.text ?? "");
-    if (!jsonStr) {
-      logger.warn("Gemini response for questions was empty.", { skillName });
-      return [];
-    }
-
-    const result = JSON.parse(jsonStr);
-    
-    if (result && Array.isArray(result.questions)) {
-      logger.info(`Generated ${result.questions.length} questions for ${skillName} (${level}).`);
-      return result.questions.filter((q: unknown) => typeof q === 'string' && q.trim());
-    }
-    
-    logger.warn("Gemini response for questions was not in the expected format.", { skillName, result });
-    return [];
-
-  } catch (error) {
-    logger.error(`Error generating interview questions for ${skillName}:`, error);
-    // Re-throw the error so the UI can handle it, e.g., show an alert
-    throw new Error(`Failed to generate questions for ${skillName}`);
-  }
-};
-
 export const generateAnswerForQuestion = async (questionText: string): Promise<string> => {
   logger.debug('Generating answer for question:', questionText);
   try {
-    const prompt = `As an expert mentor, provide a concise and clear answer for the following interview question. Be to the point. Include examples only if essential for explanation. Use markdown for formatting. Keep the tone encouraging and educational, but brief.
-
-Question: "${questionText}"`;
+    const prompt = `As an expert mentor, provide a concise and clear answer for the following interview question. Be to the point. Include examples only if essential for explanation. Use markdown for formatting. Keep the tone encouraging and educational, but brief.\n\nQuestion: "${questionText}"`;
 
     const response: GenerateContentResponse = await ai.models.generateContent({
         model: model,
@@ -159,32 +66,7 @@ export const evaluateAnswer = async (questionText: string, userAnswer: string): 
             ? userAnswer.substring(0, MAX_USER_ANSWER_LENGTH) 
             : userAnswer;
 
-        const prompt = `You are an expert interview mentor. A user is practicing for an interview.
-Here is the question they were asked, and the answer they provided.
-
-Question:
----
-${questionText}
----
-
-User's Answer:
----
-${truncatedUserAnswer}
----
-
-Your tasks are:
-1. First, provide an ideal, concise answer to the question. Be brief and to the point. Use markdown for formatting and include code examples only if essential.
-2. Second, evaluate the user's answer. Provide concise, constructive feedback. Focus on the most important points for improvement. Use markdown.
-3. Third, classify the user's answer as 'correct', 'partially_correct', or 'incorrect'.
-4. Fourth, identify specific technical concepts or keywords that the user demonstrated understanding of in their answer. List them as an array of strings. If no concepts were demonstrated, return an empty array.
-5. Fifth, identify specific technical concepts or keywords related to the question that the user missed, misunderstood, or should review. List them as an array of strings. If no concepts were missed, return an empty array.
-
-Return a JSON object with five keys:
-- "mentorAnswer": The ideal, concise answer (string, markdown formatted).
-- "feedback": Your concise, constructive feedback for the user (string, markdown formatted).
-- "classification": Your classification ('correct', 'partially_correct', 'incorrect').
-- "conceptsKnown": An array of strings, listing concepts the user demonstrated understanding of.
-- "conceptsToReview": An array of strings, listing concepts the user missed or should review.`;
+        const prompt = `You are an expert interview mentor. A user is practicing for an interview.\nHere is the question they were asked, and the answer they provided.\n\nQuestion:\n---\n${questionText}\n---\n\nUser's Answer:\n---\n${truncatedUserAnswer}\n---\n\nYour tasks are:\n1. First, provide an ideal, concise answer to the question. Be brief and to the point. Use markdown for formatting and include code examples only if essential.\n2. Second, evaluate the user's answer. Provide concise, constructive feedback. Focus on the most important points for improvement. Use markdown.\n3. Third, classify the user's answer as 'correct', 'partially_correct', or 'incorrect'.\n4. Fourth, identify specific technical concepts or keywords that the user demonstrated understanding of in their answer. List them as an array of strings. If no concepts were demonstrated, return an empty array.\n5. Fifth, identify specific technical concepts or keywords related to the question that the user missed, misunderstood, or should review. List them as an array of strings. If no concepts were missed, return an empty array.\n\nReturn a JSON object with five keys:\n- "mentorAnswer": The ideal, concise answer (string, markdown formatted).\n- "feedback": Your concise, constructive feedback for the user (string, markdown formatted).\n- "classification": Your classification ('correct', 'partially_correct', 'incorrect').\n- "conceptsKnown": An array of strings, listing concepts the user demonstrated understanding of.\n- "conceptsToReview": An array of strings, listing concepts the user missed or should review.`;
 
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: model,
@@ -236,31 +118,7 @@ Return a JSON object with five keys:
 export const generateRevisionSummary = async (knownQuestions: string[], unknownQuestions: string[]): Promise<{ conceptsKnown: string; conceptsToReview: string; }> => {
   logger.debug('Generating revision summary.', { knownQuestions, unknownQuestions });
   try {
-    const prompt = `You are an expert learning assistant. A user has practiced a skill and you need to create a revision summary based on their performance.
-
-I will provide you with two lists of questions:
-1. Questions they knew or partially knew the answer to.
-2. Questions they did not know the answer to or got incorrect.
-
-Your task is to:
-- Analyze each list of questions.
-- Identify the core concepts or topics being tested in each list.
-- Generate a concise summary for each list in markdown bullet points.
-- The summary should not just be a list of the questions, but a synthesis of the underlying topics.
-
-Questions the user KNEW:
----
-- ${knownQuestions.join('\n- ')}
----
-
-Questions the user DID NOT KNOW:
----
-- ${unknownQuestions.join('\n- ')}
----
-
-Return a JSON object with two keys:
-- "conceptsKnown": A summary of topics the user is comfortable with (string, markdown formatted).
-- "conceptsToReview": A summary of topics the user should focus on for revision (string, markdown formatted).`;
+    const prompt = `You are an expert learning assistant. A user has practiced a skill and you need to create a revision summary based on their performance.\n\nI will provide you with two lists of questions:\n1. Questions they knew or partially knew the answer to.\n2. Questions they did not know the answer to or got incorrect.\n\nYour task is to:\n- Analyze each list of questions.\n- Identify the core concepts or topics being tested in each list.\n- Generate a concise summary for each list in markdown bullet points.\n- The summary should not just be a list of the questions, but a synthesis of the underlying topics.\n\nQuestions the user KNEW:\n---\n- ${knownQuestions.join('\n- ')}\n---\n\nQuestions the user DID NOT KNOW:\n---\n- ${unknownQuestions.join('\n- ')}\n---\n\nReturn a JSON object with two keys:\n- "conceptsKnown": A summary of topics the user is comfortable with (string, markdown formatted).\n- "conceptsToReview": A summary of topics the user should focus on for revision (string, markdown formatted).`;
 
     const response = await ai.models.generateContent({
       model,
@@ -269,7 +127,7 @@ Return a JSON object with two keys:
         responseMimeType: 'application/json',
         maxOutputTokens: 1500,
         safetySettings: [
-          { category: HarmCategory.HARM_CATEGORY_HARASSment, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
           { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
           { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
           { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },

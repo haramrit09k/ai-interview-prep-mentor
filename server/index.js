@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const pool = require('./db');
 const { authMiddleware } = require('./auth');
+const { generateQuestionsForSkill } = require('./geminiService');
 const Stripe = require('stripe');
 
 const app = express();
@@ -89,6 +90,80 @@ app.post('/api/user/seen-welcome-modal', express.json(), authMiddleware, async (
     res.status(200).send('Welcome modal status updated');
   } catch (err) {
     logger.error(`POST /api/user/seen-welcome-modal: Error for user ${req.userId}:`, err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+app.get('/api/questions', authMiddleware, async (req, res) => {
+  logger.debug(`GET /api/questions: User ID: ${req.userId}`);
+  const { skillName, level, count } = req.query;
+  const requestedCount = parseInt(count, 10);
+
+  if (!skillName || !level || isNaN(requestedCount) || requestedCount <= 0) {
+    logger.warn(`GET /api/questions: Invalid request parameters for user ${req.userId}.`);
+    return res.status(400).send('Missing or invalid parameters: skillName, level, count');
+  }
+
+  try {
+    const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
+    let storedQuestions = [];
+    if (rows.length > 0 && rows[0].unanswered_questions) {
+      storedQuestions = JSON.parse(rows[0].unanswered_questions);
+      logger.info(`GET /api/questions: Found ${storedQuestions.length} stored unanswered questions for user ${req.userId}.`);
+    }
+
+    let questionsToReturn = [];
+    let remainingCount = requestedCount;
+    let updatedStoredQuestions = [...storedQuestions];
+
+    // Prioritize stored questions
+    if (storedQuestions.length > 0) {
+      const numToTake = Math.min(requestedCount, storedQuestions.length);
+      questionsToReturn = storedQuestions.slice(0, numToTake);
+      updatedStoredQuestions = storedQuestions.slice(numToTake);
+      remainingCount -= numToTake;
+      logger.info(`GET /api/questions: Returning ${numToTake} questions from storage for user ${req.userId}.`);
+    }
+
+    // Generate new questions if needed
+    if (remainingCount > 0) {
+      logger.info(`GET /api/questions: Generating ${remainingCount} new questions for user ${req.userId}.`);
+      const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount);
+      questionsToReturn = [...questionsToReturn, ...newQuestions];
+    }
+
+    // Update unanswered questions in DB (remove those sent to frontend)
+    await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(updatedStoredQuestions), req.userId]);
+    logger.info(`GET /api/questions: Updated unanswered questions in DB for user ${req.userId}. Remaining: ${updatedStoredQuestions.length}.`);
+
+    res.json({ questions: questionsToReturn });
+
+  } catch (err) {
+    logger.error(`GET /api/questions: Error for user ${req.userId}:`, err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+app.post('/api/questions/save-unanswered', express.json(), authMiddleware, async (req, res) => {
+  logger.debug(`POST /api/questions/save-unanswered: User ID: ${req.userId}`);
+  const { unansweredQuestions } = req.body;
+
+  try {
+    // Fetch current unanswered questions
+    const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
+    let currentUnanswered = [];
+    if (rows.length > 0 && rows[0].unanswered_questions) {
+      currentUnanswered = JSON.parse(rows[0].unanswered_questions);
+    }
+
+    // Add new unanswered questions, ensuring no duplicates
+    const newUnanswered = [...new Set([...currentUnanswered, ...unansweredQuestions])];
+
+    await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(newUnanswered), req.userId]);
+    logger.info(`POST /api/questions/save-unanswered: Saved ${newUnanswered.length} unanswered questions for user ${req.userId}.`);
+    res.status(200).send('Unanswered questions saved');
+  } catch (err) {
+    logger.error(`POST /api/questions/save-unanswered: Error for user ${req.userId}:`, err.message);
     res.status(500).send('Server Error');
   }
 });
