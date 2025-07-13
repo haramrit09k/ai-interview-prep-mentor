@@ -1,0 +1,1 @@
+Make sure that the commit message and description should have simple language and should not have fancy text formatting.
