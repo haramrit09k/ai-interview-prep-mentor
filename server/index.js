@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env.local') });
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -10,6 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Initialize Stripe with your secret key
+console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY);
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Middleware
@@ -20,16 +21,24 @@ app.use(cors());
 app.get('/api/quota', authMiddleware, async (req, res) => {
   console.log(`GET /api/quota: User ID: ${req.userId}`);
   try {
-    const { rows } = await pool.query('SELECT questions_used, last_reset_date FROM users WHERE id = $1', [req.userId]);
+    const { rows } = await pool.query('SELECT questions_used, last_reset_date, has_seen_welcome_modal FROM users WHERE id = $1', [req.userId]);
     if (rows.length > 0) {
-      console.log(`GET /api/quota: Found user ${req.userId}. Quota: ${rows[0].questions_used}`);
-      res.json({ questionsUsed: rows[0].questions_used, lastResetDate: typeof rows[0].last_reset_date === 'string' ? rows[0].last_reset_date : rows[0].last_reset_date.toISOString().split('T')[0] });
+      console.log(`GET /api/quota: Found user ${req.userId}. Quota: ${rows[0].questions_used}, Welcome Modal Seen: ${rows[0].has_seen_welcome_modal}`);
+      res.json({
+        questionsUsed: rows[0].questions_used,
+        lastResetDate: typeof rows[0].last_reset_date === 'string' ? rows[0].last_reset_date : rows[0].last_reset_date.toISOString().split('T')[0],
+        hasSeenWelcomeModal: rows[0].has_seen_welcome_modal
+      });
     } else {
       // User not found, create them
       const today = new Date().toISOString().split('T')[0];
       console.log(`GET /api/quota: User ${req.userId} not found, creating new entry.`);
-      await pool.query('INSERT INTO users (id, questions_used, last_reset_date) VALUES ($1, 0, $2)', [req.userId, today]);
-      res.json({ questionsUsed: 0, lastResetDate: today });
+      await pool.query('INSERT INTO users (id, questions_used, last_reset_date, has_seen_welcome_modal) VALUES ($1, 0, $2, FALSE)', [req.userId, today]);
+      res.json({
+        questionsUsed: 0,
+        lastResetDate: today,
+        hasSeenWelcomeModal: false
+      });
     }
   } catch (err) {
     console.error(`GET /api/quota: Error for user ${req.userId}:`, err.message);
@@ -45,6 +54,18 @@ app.post('/api/quota/increment', express.json(), authMiddleware, async (req, res
     res.status(200).send('Quota updated');
   } catch (err) {
     console.error(`POST /api/quota/increment: Error for user ${req.userId}:`, err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+app.post('/api/user/seen-welcome-modal', express.json(), authMiddleware, async (req, res) => {
+  console.log(`POST /api/user/seen-welcome-modal: User ID: ${req.userId}`);
+  try {
+    await pool.query('UPDATE users SET has_seen_welcome_modal = TRUE WHERE id = $1', [req.userId]);
+    console.log(`POST /api/user/seen-welcome-modal: Welcome modal status updated for user ${req.userId}.`);
+    res.status(200).send('Welcome modal status updated');
+  } catch (err) {
+    console.error(`POST /api/user/seen-welcome-modal: Error for user ${req.userId}:`, err.message);
     res.status(500).send('Server Error');
   }
 });

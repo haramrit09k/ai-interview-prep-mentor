@@ -52,7 +52,8 @@ const createTableSql = `
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     questions_used INTEGER DEFAULT 0,
-    last_reset_date TEXT NOT NULL
+    last_reset_date TEXT NOT NULL,
+    has_seen_welcome_modal BOOLEAN DEFAULT FALSE
   );
 `;
 
