@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import useLocalStorage from './hooks/useLocalStorage';
 import type { Skill, Question, AnswerOutcome, ExperienceLevel, AnswerHistory, UserProfile } from './types';
-import { generateQuestionsForSkill } from './services/gemini';
+
 import SkillManagement from './components/SkillManagement';
 import PracticeView from './components/PracticeView';
 import CustomQuestionModal from './components/CustomQuestionModal';
@@ -14,6 +14,7 @@ import { SpinnerIcon } from './components/Icons';
 import { v4 as uuidv4 } from 'uuid';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
+import logger from './src/logger'; // Import the logger
 
 
 // Helper to shuffle array
@@ -199,12 +200,24 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     setPracticeOptions({ isOpen: false, skill: null });
 
     try {
-        const questionTexts = await generateQuestionsForSkill(skill.name, level, count);
-        const aiQuestions: Question[] = questionTexts.map(text => ({
+        logger.info(`Fetching questions for skill: ${skill.name}, level: ${level}, count: ${count}`);
+        const response = await fetch(`/api/questions?skillName=${encodeURIComponent(skill.name)}&level=${encodeURIComponent(level)}&count=${count}`, {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
+            }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to fetch questions from backend');
+        }
+
+        const data = await response.json();
+        const fetchedQuestions: Question[] = data.questions.map((text: string) => ({
             id: uuidv4(),
             skillId: skill.id,
             text,
-            source: 'gemini'
+            source: 'gemini' // All questions from this endpoint are from Gemini or previously generated
         }));
         
         if (!isAuthenticated) {
@@ -212,7 +225,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         }
 
         const userQuestions = customQuestions.filter(q => q.skillId === skill.id);
-        const allQuestions = shuffleArray([...userQuestions, ...aiQuestions]);
+        const allQuestions = shuffleArray([...userQuestions, ...fetchedQuestions]);
 
         if (allQuestions.length === 0) {
             alert("Could not generate or find any questions for this topic. Please try again.");
@@ -227,16 +240,36 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             consumedQuestionIds: new Set(),
         });
     } catch(error) {
-        console.error(error);
+        logger.error('Error fetching questions:', error);
         alert(`An error occurred while fetching questions: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
         setIsStartingSession(false);
     }
   }, [customQuestions, isAuthenticated, sessionsRemaining, setAnonSessionsUsed]);
 
-  const endPracticeSession = () => {
+  const endPracticeSession = useCallback(async () => {
+    if (practiceSession && isAuthenticated) {
+      const unansweredQuestions = practiceSession.questions.filter(q => !practiceSession.consumedQuestionIds.has(q.id));
+      const unansweredQuestionTexts = unansweredQuestions.map(q => q.text);
+
+      if (unansweredQuestionTexts.length > 0) {
+        logger.info(`Saving ${unansweredQuestionTexts.length} unanswered questions for user ${userId}.`);
+        try {
+          await fetch('/api/questions/save-unanswered', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
+            },
+            body: JSON.stringify({ unansweredQuestions: unansweredQuestionTexts }),
+          });
+        } catch (error) {
+          logger.error('Error saving unanswered questions:', error);
+        }
+      }
+    }
     setPracticeSession(null);
-  };
+  }, [practiceSession, isAuthenticated, userId]);
   
   const navigateQuestion = (direction: 'next' | 'prev') => {
     setPracticeSession(prevSession => {
