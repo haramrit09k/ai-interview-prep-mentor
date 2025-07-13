@@ -69,7 +69,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
   }, [session.currentQuestionIndex, session.skill.id]);
 
   const handleUpgrade = useCallback(async (quantity: number) => {
-    console.log(`Attempting to purchase ${quantity} questions...`);
+    
     try {
       const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
@@ -130,9 +130,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
             value={userAnswer}
             onChange={(e) => setUserAnswer(e.target.value)}
             placeholder="Type your answer here..."
+            maxLength={5000} // Limit input to approximately 1000 words
             className="w-full bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-3"
             aria-label="Your Answer"
         />
+        <div className="text-right text-sm text-text-muted mt-1">
+          {userAnswer.length}/5000 characters
+        </div>
         <div className="flex flex-col sm:flex-row gap-4">
             <button
                 onClick={() => handleSubmission(false)}

@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, Type, GenerateContentResponse, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import type { EvaluationResponse, ExperienceLevel } from '../types';
 
 const API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -73,6 +73,13 @@ ${levelSpecificInstructions}
       contents: contents,
       config: {
         responseMimeType: "application/json",
+        maxOutputTokens: 1500,
+        safetySettings: [
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        ],
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -87,7 +94,7 @@ ${levelSpecificInstructions}
       }
     });
     
-    const jsonStr = cleanJsonString(response.text);
+    const jsonStr = cleanJsonString(response.text ?? "");
     if (!jsonStr) {
       console.warn("Gemini response for questions was empty.", { skillName });
       return [];
@@ -117,10 +124,19 @@ Question: "${questionText}"`;
 
     const response: GenerateContentResponse = await ai.models.generateContent({
         model: model,
-        contents: prompt
+        contents: prompt,
+        config: {
+          maxOutputTokens: 1500,
+          safetySettings: [
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          ],
+        }
     });
 
-    return response.text;
+    return response.text ?? "";
   } catch (error) {
     console.error("Error generating answer:", error);
     return "Sorry, I encountered an error while generating an answer. Please try again.";
@@ -129,6 +145,12 @@ Question: "${questionText}"`;
 
 export const evaluateAnswer = async (questionText: string, userAnswer: string): Promise<EvaluationResponse> => {
     try {
+        // Truncate userAnswer to prevent excessively long inputs
+        const MAX_USER_ANSWER_LENGTH = 5000; // Approximately 1000 words
+        const truncatedUserAnswer = userAnswer.length > MAX_USER_ANSWER_LENGTH 
+            ? userAnswer.substring(0, MAX_USER_ANSWER_LENGTH) 
+            : userAnswer;
+
         const prompt = `You are an expert interview mentor. A user is practicing for an interview.
 Here is the question they were asked, and the answer they provided.
 
@@ -139,7 +161,7 @@ ${questionText}
 
 User's Answer:
 ---
-${userAnswer}
+${truncatedUserAnswer}
 ---
 
 Your tasks are:
@@ -161,6 +183,13 @@ Return a JSON object with five keys:
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
+                maxOutputTokens: 1500,
+                safetySettings: [
+                  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+                  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+                  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+                  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+                ],
                 responseSchema: {
                     type: Type.OBJECT,
                     properties: {
@@ -175,12 +204,12 @@ Return a JSON object with five keys:
             }
         });
 
-        const jsonStr = cleanJsonString(response.text);
+        const jsonStr = cleanJsonString(response.text ?? "");
         if (!jsonStr) {
           throw new Error("Received empty response from evaluation API");
         }
         const result = JSON.parse(jsonStr);
-        console.log("Gemini Evaluation Result:", result);
+        
         return result as EvaluationResponse;
     } catch (error) {
         console.error("Error evaluating answer:", error);
@@ -227,6 +256,13 @@ Return a JSON object with two keys:
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 1500,
+        safetySettings: [
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        ],
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -244,7 +280,7 @@ Return a JSON object with two keys:
       },
     });
 
-    const jsonStr = cleanJsonString(response.text);
+    const jsonStr = cleanJsonString(response.text ?? "");
     if (!jsonStr) {
       throw new Error('Received empty summary from API');
     }
