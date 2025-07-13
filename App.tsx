@@ -9,6 +9,7 @@ import StartPracticeModal from './components/StartPracticeModal';
 import RevisionSummaryModal from './components/RevisionSummaryModal';
 import Header from './components/Header';
 import { LimitReachedModal } from './components/LimitReachedModal';
+import { WelcomeModal } from './components/WelcomeModal';
 import { SpinnerIcon } from './components/Icons';
 import { v4 as uuidv4 } from 'uuid';
 import { GoogleOAuthProvider } from '@react-oauth/google';
@@ -72,6 +73,9 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   
   // --- STATE FOR QUOTA MANAGEMENT ---
   const [anonSessionsUsed, setAnonSessionsUsed] = useLocalStorage<number>('interview_prep_anon_sessions_used', 0);
+  const [hasSeenWelcomeModal, setHasSeenWelcomeModal] = useLocalStorage<boolean>('interview_prep_seen_welcome_modal', false);
+  const [hasSeenWelcomeModalAuth, setHasSeenWelcomeModalAuth] = useState<boolean | null>(null);
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState<boolean>(false);
   
   const [authQuota, setAuthQuota] = useState<AuthQuota>({ questionsUsed: 0, lastResetDate: new Date().toISOString().split('T')[0] });
 
@@ -88,6 +92,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           if (response.ok) {
             const data = await response.json();
             setAuthQuota(data);
+            setHasSeenWelcomeModalAuth(data.hasSeenWelcomeModal);
           } else {
             console.error('Failed to fetch quota', response.statusText);
           }
@@ -344,6 +349,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         questionsRemaining={questionsRemaining}
         isAuthenticated={isAuthenticated}
         onPurchaseQuestions={handlePurchaseQuestions}
+        onOpenWelcomeModal={() => setIsWelcomeModalOpen(true)}
       />
       {isStartingSession && (
          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -394,6 +400,26 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           reason={limitModal.reason}
           onClose={() => setLimitModal({ isOpen: false, reason: null })}
         />
+      )}
+      {(isWelcomeModalOpen || (!isAuthenticated && !hasSeenWelcomeModal) || (isAuthenticated && hasSeenWelcomeModalAuth === false)) && (
+        <WelcomeModal onClose={async () => {
+          setIsWelcomeModalOpen(false); // Close the modal
+          if (isAuthenticated) {
+            try {
+              await fetch('/api/user/seen-welcome-modal', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
+                },
+              });
+              setHasSeenWelcomeModalAuth(true);
+            } catch (error) {
+              console.error('Error updating welcome modal status:', error);
+            }
+          } else {
+            setHasSeenWelcomeModal(true);
+          }
+        }} />
       )}
     </div>
   );
