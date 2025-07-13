@@ -60,7 +60,7 @@ const SkillManagement: React.FC<SkillManagementProps> = ({
             disabled={isSkillLimitReached || !newSkill.trim()}
           >
             <PlusIcon className="w-5 h-5" />
-            <span className="hidden sm:inline">Add Skill</span>
+            <span>Add Skill</span>
           </button>
         </form>
 
