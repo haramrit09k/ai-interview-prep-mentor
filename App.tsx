@@ -134,7 +134,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const [practiceSession, setPracticeSession] = useState<PracticeSession | null>(null);
   const [isStartingSession, setIsStartingSession] = useState<boolean>(false);
   const [isCustomQuestionModalOpen, setIsCustomQuestionModalOpen] = useState<boolean>(false);
-  const [limitModal, setLimitModal] = useState<{ isOpen: boolean; reason: 'skills' | 'sessions' | null }>({ isOpen: false, reason: null });
+  const [limitModal, setLimitModal] = useState<{ isOpen: boolean; reason: 'skills' | 'sessions' | 'quota' | null }>({ isOpen: false, reason: null });
   const [practiceOptions, setPracticeOptions] = useState<{ isOpen: boolean; skill: Skill | null }>({ isOpen: false, skill: null });
   const [revisionModal, setRevisionModal] = useState<{ isOpen: boolean; skill: Skill | null }>({ isOpen: false, skill: null });
 
@@ -218,7 +218,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
 
     try {
         logger.info(`Fetching questions for skill: ${skill.name}, level: ${level}, count: ${count}`);
-        const response = await fetch(`/api/questions?skillName=${encodeURIComponent(skill.name)}&level=${encodeURIComponent(level)}&count=${count}`, {
+        const response = await fetch(`/api/questions?skillName=${encodeURIComponent(skill.name)}&level=${encodeURIComponent(level)}&count=${count}&skillId=${skill.id}`, {
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
             }
@@ -244,11 +244,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             throw new Error(data.error || 'Failed to fetch questions from backend');
         }
 
-        const fetchedQuestions: Question[] = data.questions.map((text: string) => ({
+        const fetchedQuestions: Question[] = data.questions.map((q: any) => ({
             id: uuidv4(),
-            skillId: skill.id,
-            text,
-            source: 'gemini'
+            skillId: q.skillId || skill.id,
+            text: q.text,
+            source: 'gemini',
+            level: q.level
         }));
         
         if (!isAuthenticated) {
@@ -286,10 +287,9 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         return;
       }
       const unansweredQuestions = practiceSession.questions.filter(q => !practiceSession.consumedQuestionIds.has(q.id));
-      const unansweredQuestionTexts = unansweredQuestions.map(q => q.text);
 
-      if (unansweredQuestionTexts.length > 0) {
-        logger.info(`Saving ${unansweredQuestionTexts.length} unanswered questions for user ${userId}.`);
+      if (unansweredQuestions.length > 0) {
+        logger.info(`Saving ${unansweredQuestions.length} unanswered questions for user ${userId}.`);
         try {
           await fetch('/api/questions/save-unanswered', {
             method: 'POST',
@@ -297,7 +297,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
             },
-            body: JSON.stringify({ unansweredQuestions: unansweredQuestionTexts }),
+            body: JSON.stringify({ unansweredQuestions }), // The backend now expects the full question objects
           });
         } catch (error) {
           logger.error('Error saving unanswered questions:', error);
@@ -472,6 +472,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         <LimitReachedModal
           reason={limitModal.reason}
           onClose={() => setLimitModal({ isOpen: false, reason: null })}
+          onUpgrade={handlePurchaseQuestions}
         />
       )}
       {(isWelcomeModalOpen || (!isAuthenticated && !hasSeenWelcomeModal) || (isAuthenticated && hasSeenWelcomeModalAuth === false)) && (
