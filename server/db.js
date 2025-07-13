@@ -1,4 +1,5 @@
 const isProduction = process.env.NODE_ENV === 'production';
+const logger = require('./logger');
 
 let db;
 
@@ -11,7 +12,17 @@ if (isProduction) {
     }
   });
   db = {
-    query: (text, params) => pool.query(text, params)
+    query: async (text, params) => {
+      logger.debug('Executing PG query:', { text, params });
+      try {
+        const result = await pool.query(text, params);
+        logger.debug('PG query successful:', { text, rows: result.rows.length });
+        return result;
+      } catch (err) {
+        logger.error('PG query failed:', { text, params, error: err.message });
+        throw err;
+      }
+    }
   };
 } else {
   const sqlite3 = require('sqlite3').verbose();
@@ -19,26 +30,38 @@ if (isProduction) {
   const sqliteDbPath = process.env.SQLITE_DB_PATH || './dev.sqlite';
   const sqlite = new sqlite3.Database(sqliteDbPath, (err) => {
     if (err) {
-      console.error('Could not connect to SQLite database', err);
+      logger.error('Could not connect to SQLite database', err);
     } else {
-      console.log('Connected to SQLite database');
+      logger.info('Connected to SQLite database');
     }
   });
 
   db = {
     query: (text, params) => {
+      logger.debug('Executing SQLite query:', { text, params });
       return new Promise((resolve, reject) => {
-        // Determine if it's a SELECT query
         const isSelect = text.trim().toUpperCase().startsWith('SELECT');
         if (isSelect) {
           sqlite.all(text, params, (err, rows) => {
-            if (err) reject(err);
-            else resolve({ rows }); // Emulate pg.Pool result structure
+            if (err) {
+              logger.error('SQLite SELECT query failed:', { text, params, error: err.message });
+              reject(err);
+            }
+            else {
+              logger.debug('SQLite SELECT query successful:', { text, rows: rows.length });
+              resolve({ rows });
+            }
           });
         } else {
-          sqlite.run(text, params, function (err) { // Use 'function' for 'this' context
-            if (err) reject(err);
-            else resolve({ rowCount: this.changes }); // Emulate pg.Pool result structure (approx)
+          sqlite.run(text, params, function (err) {
+            if (err) {
+              logger.error('SQLite DML query failed:', { text, params, error: err.message });
+              reject(err);
+            }
+            else {
+              logger.debug('SQLite DML query successful:', { text, changes: this.changes });
+              resolve({ rowCount: this.changes });
+            }
           });
         }
       });
@@ -58,15 +81,15 @@ const createTableSql = `
 `;
 
 db.query(createTableSql)
-  .then(() => console.log('Users table checked/created'))
-  .catch(err => console.error('Error creating users table', err));
+  .then(() => logger.info('Users table checked/created'))
+  .catch(err => logger.error('Error creating users table', err));
 
 // Add has_seen_welcome_modal column if it doesn't exist
 db.query(`
   ALTER TABLE users
   ADD COLUMN IF NOT EXISTS has_seen_welcome_modal BOOLEAN DEFAULT FALSE;
 `)
-  .then(() => console.log('Added has_seen_welcome_modal column to users table if not exists'))
-  .catch(err => console.error('Error adding has_seen_welcome_modal column', err));
+  .then(() => logger.info('Added has_seen_welcome_modal column to users table if not exists'))
+  .catch(err => logger.error('Error adding has_seen_welcome_modal column', err));
 
 module.exports = db;

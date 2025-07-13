@@ -1,10 +1,12 @@
 
 import { GoogleGenAI, Type, GenerateContentResponse, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import type { EvaluationResponse, ExperienceLevel } from '../types';
+import logger from '../src/logger'; // Import the logger
 
 const API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
 
 if (!API_KEY) {
+  logger.error("API_KEY environment variable not set.");
   throw new Error("API_KEY environment variable not set.");
 }
 
@@ -94,29 +96,33 @@ ${levelSpecificInstructions}
       }
     });
     
+    logger.debug('Gemini API response for questions:', response);
+
     const jsonStr = cleanJsonString(response.text ?? "");
     if (!jsonStr) {
-      console.warn("Gemini response for questions was empty.", { skillName });
+      logger.warn("Gemini response for questions was empty.", { skillName });
       return [];
     }
 
     const result = JSON.parse(jsonStr);
     
     if (result && Array.isArray(result.questions)) {
+      logger.info(`Generated ${result.questions.length} questions for ${skillName} (${level}).`);
       return result.questions.filter((q: unknown) => typeof q === 'string' && q.trim());
     }
     
-    console.warn("Gemini response for questions was not in the expected format.", { skillName, result });
+    logger.warn("Gemini response for questions was not in the expected format.", { skillName, result });
     return [];
 
   } catch (error) {
-    console.error(`Error generating interview questions for ${skillName}:`, error);
+    logger.error(`Error generating interview questions for ${skillName}:`, error);
     // Re-throw the error so the UI can handle it, e.g., show an alert
     throw new Error(`Failed to generate questions for ${skillName}`);
   }
 };
 
 export const generateAnswerForQuestion = async (questionText: string): Promise<string> => {
+  logger.debug('Generating answer for question:', questionText);
   try {
     const prompt = `As an expert mentor, provide a concise and clear answer for the following interview question. Be to the point. Include examples only if essential for explanation. Use markdown for formatting. Keep the tone encouraging and educational, but brief.
 
@@ -136,14 +142,16 @@ Question: "${questionText}"`;
         }
     });
 
+    logger.debug('Gemini API response for answer:', response);
     return response.text ?? "";
   } catch (error) {
-    console.error("Error generating answer:", error);
+    logger.error("Error generating answer:", error);
     return "Sorry, I encountered an error while generating an answer. Please try again.";
   }
 };
 
 export const evaluateAnswer = async (questionText: string, userAnswer: string): Promise<EvaluationResponse> => {
+    logger.debug('Evaluating answer for question:', questionText);
     try {
         // Truncate userAnswer to prevent excessively long inputs
         const MAX_USER_ANSWER_LENGTH = 5000; // Approximately 1000 words
@@ -204,6 +212,8 @@ Return a JSON object with five keys:
             }
         });
 
+        logger.debug('Gemini API response for evaluation:', response);
+
         const jsonStr = cleanJsonString(response.text ?? "");
         if (!jsonStr) {
           throw new Error("Received empty response from evaluation API");
@@ -212,7 +222,7 @@ Return a JSON object with five keys:
         
         return result as EvaluationResponse;
     } catch (error) {
-        console.error("Error evaluating answer:", error);
+        logger.error("Error evaluating answer:", error);
         return {
             mentorAnswer: "Sorry, I encountered an error while generating an answer. Please try again.",
             feedback: "Could not evaluate your answer due to an error.",
@@ -224,6 +234,7 @@ Return a JSON object with five keys:
 };
 
 export const generateRevisionSummary = async (knownQuestions: string[], unknownQuestions: string[]): Promise<{ conceptsKnown: string; conceptsToReview: string; }> => {
+  logger.debug('Generating revision summary.', { knownQuestions, unknownQuestions });
   try {
     const prompt = `You are an expert learning assistant. A user has practiced a skill and you need to create a revision summary based on their performance.
 
@@ -258,7 +269,7 @@ Return a JSON object with two keys:
         responseMimeType: 'application/json',
         maxOutputTokens: 1500,
         safetySettings: [
-          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          { category: HarmCategory.HARM_CATEGORY_HARASSment, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
           { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
           { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
           { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -280,13 +291,15 @@ Return a JSON object with two keys:
       },
     });
 
+    logger.debug('Gemini API response for revision summary:', response);
+
     const jsonStr = cleanJsonString(response.text ?? "");
     if (!jsonStr) {
       throw new Error('Received empty summary from API');
     }
     return JSON.parse(jsonStr);
   } catch (error) {
-    console.error('Error generating revision summary:', error);
+    logger.error('Error generating revision summary:', error);
     return {
       conceptsKnown: 'Could not generate summary due to an error.',
       conceptsToReview: 'Could not generate summary due to an error.',
