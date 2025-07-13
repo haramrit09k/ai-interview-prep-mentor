@@ -96,45 +96,44 @@ app.post('/api/user/seen-welcome-modal', express.json(), authMiddleware, async (
 
 app.get('/api/questions', authMiddleware, async (req, res) => {
   logger.debug(`GET /api/questions: User ID: ${req.userId}`);
-  const { skillName, level, count } = req.query;
+  const { skillName, level, count, skillId } = req.query; // skillId is now expected
   const requestedCount = parseInt(count, 10);
 
-  if (!skillName || !level || isNaN(requestedCount) || requestedCount <= 0) {
+  if (!skillName || !level || !skillId || isNaN(requestedCount) || requestedCount <= 0) {
     logger.warn(`GET /api/questions: Invalid request parameters for user ${req.userId}.`);
-    return res.status(400).send('Missing or invalid parameters: skillName, level, count');
+    return res.status(400).send('Missing or invalid parameters: skillName, level, count, skillId');
   }
 
   try {
     const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
-    let storedQuestions = [];
+    let storedQuestionMap = {};
     if (rows.length > 0 && rows[0].unanswered_questions) {
-      storedQuestions = JSON.parse(rows[0].unanswered_questions);
-      logger.info(`GET /api/questions: Found ${storedQuestions.length} stored unanswered questions for user ${req.userId}.`);
+      storedQuestionMap = JSON.parse(rows[0].unanswered_questions);
+      logger.info(`GET /api/questions: Found stored questions for user ${req.userId}.`);
     }
 
+    const questionsForLevel = storedQuestionMap[skillId]?.[level] || [];
     let questionsToReturn = [];
     let remainingCount = requestedCount;
-    let updatedStoredQuestions = [...storedQuestions];
 
-    // Prioritize stored questions
-    if (storedQuestions.length > 0) {
-      const numToTake = Math.min(requestedCount, storedQuestions.length);
-      questionsToReturn = storedQuestions.slice(0, numToTake);
-      updatedStoredQuestions = storedQuestions.slice(numToTake);
+    if (questionsForLevel.length > 0) {
+      const numToTake = Math.min(requestedCount, questionsForLevel.length);
+      questionsToReturn = questionsForLevel.slice(0, numToTake);
       remainingCount -= numToTake;
+      
+      // Update the stored map by removing the questions that were taken
+      storedQuestionMap[skillId][level] = questionsForLevel.slice(numToTake);
       logger.info(`GET /api/questions: Returning ${numToTake} questions from storage for user ${req.userId}.`);
     }
 
-    // Generate new questions if needed
     if (remainingCount > 0) {
       logger.info(`GET /api/questions: Generating ${remainingCount} new questions for user ${req.userId}.`);
-      const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount);
+      const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount, skillId);
       questionsToReturn = [...questionsToReturn, ...newQuestions];
     }
 
-    // Update unanswered questions in DB (remove those sent to frontend)
-    await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(updatedStoredQuestions), req.userId]);
-    logger.info(`GET /api/questions: Updated unanswered questions in DB for user ${req.userId}. Remaining: ${updatedStoredQuestions.length}.`);
+    await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
+    logger.info(`GET /api/questions: Updated unanswered questions in DB for user ${req.userId}.`);
 
     res.json({ questions: questionsToReturn });
 
@@ -146,21 +145,38 @@ app.get('/api/questions', authMiddleware, async (req, res) => {
 
 app.post('/api/questions/save-unanswered', express.json(), authMiddleware, async (req, res) => {
   logger.debug(`POST /api/questions/save-unanswered: User ID: ${req.userId}`);
-  const { unansweredQuestions } = req.body;
+  const { unansweredQuestions } = req.body; // Expects an array of question objects with skillId and level
+
+  if (!unansweredQuestions || !Array.isArray(unansweredQuestions) || unansweredQuestions.length === 0) {
+    return res.status(400).send('Invalid or empty unansweredQuestions array');
+  }
 
   try {
-    // Fetch current unanswered questions
     const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
-    let currentUnanswered = [];
+    let storedQuestionMap = {};
     if (rows.length > 0 && rows[0].unanswered_questions) {
-      currentUnanswered = JSON.parse(rows[0].unanswered_questions);
+      storedQuestionMap = JSON.parse(rows[0].unanswered_questions);
     }
 
-    // Add new unanswered questions, ensuring no duplicates
-    const newUnanswered = [...new Set([...currentUnanswered, ...unansweredQuestions])];
+    unansweredQuestions.forEach(question => {
+      const { skillId, level, text } = question;
+      if (!skillId || !level || !text) return; // Skip invalid questions
 
-    await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(newUnanswered), req.userId]);
-    logger.info(`POST /api/questions/save-unanswered: Saved ${newUnanswered.length} unanswered questions for user ${req.userId}.`);
+      if (!storedQuestionMap[skillId]) {
+        storedQuestionMap[skillId] = {};
+      }
+      if (!storedQuestionMap[skillId][level]) {
+        storedQuestionMap[skillId][level] = [];
+      }
+
+      // Avoid duplicates
+      if (!storedQuestionMap[skillId][level].some(q => q.text === text)) {
+        storedQuestionMap[skillId][level].push(question);
+      }
+    });
+
+    await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
+    logger.info(`POST /api/questions/save-unanswered: Saved unanswered questions for user ${req.userId}.`);
     res.status(200).send('Unanswered questions saved');
   } catch (err) {
     logger.error(`POST /api/questions/save-unanswered: Error for user ${req.userId}:`, err.message);

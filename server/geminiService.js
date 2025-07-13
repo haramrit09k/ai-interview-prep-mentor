@@ -29,8 +29,8 @@ const cleanJsonString = (str) => {
   return cleaned.trim();
 };
 
-const generateQuestionsForSkill = async (skillName, level, count) => {
-  logger.debug('Generating questions for skill:', { skillName, level, count });
+const generateQuestionsForSkill = async (skillName, level, count, skillId) => {
+  logger.debug('Generating questions for skill:', { skillName, level, count, skillId });
   try {
     let levelSpecificInstructions = '';
 
@@ -107,7 +107,7 @@ ${levelSpecificInstructions}
     
     if (result && Array.isArray(result.questions)) {
       logger.info(`Generated ${result.questions.length} questions for ${skillName} (${level}).`);
-      return result.questions.filter((q) => typeof q === 'string' && q.trim());
+      return result.questions.filter((q) => typeof q === 'string' && q.trim()).map(q => ({ text: q, level, skillId }));
     }
     
     logger.warn("Gemini response for questions was not in the expected format.", { skillName, result });
