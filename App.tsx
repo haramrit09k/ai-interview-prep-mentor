@@ -59,7 +59,6 @@ interface AuthQuota {
 
 const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => {
   const [userProfile, setUserProfile] = useLocalStorage<UserProfile | null>('interview_prep_user_profile', null);
-  
   const isAuthenticated = isAuthEnabled && !!userProfile;
   const userId = isAuthenticated && userProfile ? userProfile.id : '_anon';
 
@@ -68,6 +67,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const questionsKey = `interview_prep_custom_questions_${userId}`;
   const historyKey = `interview_prep_answer_history_${userId}`;
 
+  // --- STATE HOOKS ---
   const [skills, setSkills] = useLocalStorage<Skill[]>(skillsKey, EMPTY_SKILLS);
   const [customQuestions, setCustomQuestions] = useLocalStorage<Question[]>(questionsKey, EMPTY_QUESTIONS);
   const [answerHistory, setAnswerHistory] = useLocalStorage<AnswerHistory[]>(historyKey, EMPTY_HISTORY);
@@ -79,6 +79,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState<boolean>(false);
   
   const [authQuota, setAuthQuota] = useState<AuthQuota>({ questionsUsed: 0, lastResetDate: new Date().toISOString().split('T')[0] });
+
+  // Move handleAuthError to the top before it's used
+  const handleAuthError = useCallback((logoutFn: () => void, message: string = 'Your session has expired. Please log in again.') => {
+    logger.error(`Authentication error: ${message}`);
+    logoutFn();
+  }, []);
 
   // Fetch quota from backend on authentication change
   useEffect(() => {
@@ -94,16 +100,18 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             const data = await response.json();
             setAuthQuota(data);
             setHasSeenWelcomeModalAuth(data.hasSeenWelcomeModal);
+          } else if (response.status === 401) {
+            handleAuthError(handleLogout, 'Failed to fetch quota: Unauthorized.');
           } else {
-            console.error('Failed to fetch quota', response.statusText);
+            logger.error('Failed to fetch quota', response.statusText);
           }
         } catch (error) {
-          console.error('Error fetching quota:', error);
+          logger.error('Error fetching quota:', error);
         }
       };
       fetchQuota();
     }
-  }, [isAuthenticated, userProfile]);
+  }, [isAuthenticated, userProfile, handleAuthError]);
   
   // Daily quota reset for authenticated users (handled by backend now, but keep for initial state)
   useEffect(() => {
@@ -148,12 +156,14 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     }
   }, [setUserProfile]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     if (isAuthEnabled) {
       setUserProfile(null);
       localStorage.removeItem('google_id_token'); // Clear the ID token on logout
+      logger.info('User logged out.');
+      alert('Your session has expired. Please log in again.');
     }
-  };
+  }, [isAuthEnabled, setUserProfile]);
 
   const addSkill = useCallback((name: string) => {
     if (isSkillLimitReached) {
@@ -195,6 +205,13 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       setLimitModal({ isOpen: true, reason: 'sessions' });
       return;
     }
+
+    if (isAuthenticated && !localStorage.getItem('google_id_token')) {
+      logger.warn('Authenticated user but no Google ID token found in localStorage. Please log in again.');
+      alert('Authentication token missing. Please log in again.');
+      setIsStartingSession(false);
+      return;
+    }
     
     setIsStartingSession(true);
     setPracticeOptions({ isOpen: false, skill: null });
@@ -207,17 +224,31 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             }
         });
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to fetch questions from backend');
+        // Get response text first
+        const responseText = await response.text();
+        if (!responseText) {
+          throw new Error('Empty response from backend');
+        }
+        
+        let data;
+        try {
+          data = JSON.parse(responseText);
+        } catch (err) {
+          throw new Error(`Invalid JSON in response: ${responseText}`);
         }
 
-        const data = await response.json();
+        if (!response.ok) {
+            if (response.status === 401) {
+                handleAuthError(handleLogout, 'Failed to fetch questions: Unauthorized.');
+            }
+            throw new Error(data.error || 'Failed to fetch questions from backend');
+        }
+
         const fetchedQuestions: Question[] = data.questions.map((text: string) => ({
             id: uuidv4(),
             skillId: skill.id,
             text,
-            source: 'gemini' // All questions from this endpoint are from Gemini or previously generated
+            source: 'gemini'
         }));
         
         if (!isAuthenticated) {
@@ -249,6 +280,11 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
 
   const endPracticeSession = useCallback(async () => {
     if (practiceSession && isAuthenticated) {
+      if (!localStorage.getItem('google_id_token')) {
+        logger.warn('Authenticated user but no Google ID token found in localStorage. Cannot save unanswered questions.');
+        setPracticeSession(null);
+        return;
+      }
       const unansweredQuestions = practiceSession.questions.filter(q => !practiceSession.consumedQuestionIds.has(q.id));
       const unansweredQuestionTexts = unansweredQuestions.map(q => q.text);
 
@@ -300,8 +336,10 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             if (response.ok) {
                 // Optimistically update local state
                 setAuthQuota(prev => ({...prev, questionsUsed: prev.questionsUsed + 1}));
+            } else if (response.status === 401) {
+                handleAuthError(handleLogout, 'Failed to increment quota: Unauthorized.');
             } else {
-                console.error('Failed to increment quota on backend', response.statusText);
+                logger.error('Failed to increment quota on backend', response.statusText);
             }
         } catch (error) {
             console.error('Error incrementing quota:', error);
@@ -357,9 +395,11 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       if (response.ok) {
         const { url } = await response.json();
         window.location.href = url; // Redirect to Stripe Checkout
+      } else if (response.status === 401) {
+        handleAuthError(handleLogout, 'Failed to initiate purchase: Unauthorized.');
       } else {
         const errorData = await response.json();
-        console.error('Failed to create checkout session:', errorData.error);
+        logger.error('Failed to create checkout session:', errorData.error);
         alert(`Failed to initiate payment: ${errorData.error}`);
       }
     } catch (error) {
