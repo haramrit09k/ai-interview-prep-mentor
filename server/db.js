@@ -40,7 +40,9 @@ if (isProduction) {
     query: (text, params) => {
       logger.debug('Executing SQLite query:', { text, params });
       return new Promise((resolve, reject) => {
-        const isSelect = text.trim().toUpperCase().startsWith('SELECT');
+        const trimmedText = text.trim().toUpperCase();
+        // Treat SELECT and PRAGMA queries as ones that return rows
+        const isSelect = trimmedText.startsWith('SELECT') || trimmedText.startsWith('PRAGMA');
         if (isSelect) {
           sqlite.all(text, params, (err, rows) => {
             if (err) {
@@ -48,8 +50,8 @@ if (isProduction) {
               reject(err);
             }
             else {
-              logger.debug('SQLite SELECT query successful:', { text, rows: rows.length });
-              resolve({ rows });
+              logger.debug('SQLite SELECT query successful:', { text, rows: (rows || []).length });
+              resolve({ rows: rows || [] });
             }
           });
         } else {
@@ -81,31 +83,45 @@ const createTableSql = `
 `;
 
 db.query(createTableSql)
-  .then(() => logger.info('Users table checked/created'))
-  .catch(err => logger.error('Error creating users table', err));
+  .then(() => {
+    logger.info('Users table checked/created');
 
-// Add has_seen_welcome_modal column if it doesn't exist
-db.query(`
-  ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS has_seen_welcome_modal BOOLEAN DEFAULT FALSE;
-`)
-  .then(() => logger.info('Added has_seen_welcome_modal column to users table if not exists'))
-  .catch(err => logger.error('Error adding has_seen_welcome_modal column', err));
+    // Handle column additions based on database type
+    if (isProduction) {
+      // PostgreSQL: Use ALTER TABLE IF NOT EXISTS ADD COLUMN
+      return Promise.all([
+        db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_seen_welcome_modal BOOLEAN DEFAULT FALSE;`),
+        db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS unanswered_questions TEXT;`)
+      ]);
+    } else {
+      // SQLite: Use PRAGMA table_info check before ALTER TABLE ADD COLUMN
+      return db.query("PRAGMA table_info(users);")
+        .then(result => {
+          const columns = result.rows;
+          const promises = [];
+
+          // Add has_seen_welcome_modal column
+          const hasSeenWelcomeModalExists = columns.some(col => col.name === 'has_seen_welcome_modal');
+          if (!hasSeenWelcomeModalExists) {
+            logger.info('Adding has_seen_welcome_modal column to users table.');
+            promises.push(db.query(`ALTER TABLE users ADD COLUMN has_seen_welcome_modal BOOLEAN DEFAULT FALSE;`));
+          } else {
+            logger.info('has_seen_welcome_modal column already exists.');
+          }
+
+          // Add unanswered_questions column
+          const unansweredQuestionsExists = columns.some(col => col.name === 'unanswered_questions');
+          if (!unansweredQuestionsExists) {
+            logger.info('Adding unanswered_questions column to users table.');
+            promises.push(db.query(`ALTER TABLE users ADD COLUMN unanswered_questions TEXT;`));
+          } else {
+            logger.info('unanswered_questions column already exists.');
+          }
+          return Promise.all(promises);
+        });
+    }
+  })
+  .then(() => logger.info('Database schema initialization complete.'))
+  .catch(err => logger.error('Error initializing database schema', err));
 
 module.exports = db;
-
-// Add unanswered_questions column if it doesn't exist
-db.query(`
-  ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS unanswered_questions TEXT;
-`)
-  .then(() => logger.info('Added unanswered_questions column to users table if not exists'))
-  .catch(err => logger.error('Error adding unanswered_questions column', err));
-
-// Add unanswered_questions column if it doesn't exist
-db.query(`
-  ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS unanswered_questions TEXT;
-`)
-  .then(() => logger.info('Added unanswered_questions column to users table if not exists'))
-  .catch(err => logger.error('Error adding unanswered_questions column', err));
