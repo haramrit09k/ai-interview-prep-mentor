@@ -1,6 +1,6 @@
-
 import React, { useState } from 'react';
 import { XIcon } from './Icons';
+import { purchaseOptions } from '../config/purchaseOptions';
 
 interface LimitReachedModalProps {
   onClose: () => void;
@@ -28,13 +28,6 @@ export const LimitReachedModal: React.FC<LimitReachedModalProps> = ({ onClose, o
   };
 
   const currentMessage = messages[reason];
-
-  // Options for purchasing questions
-  const purchaseOptions = [
-    { quantity: 10, priceCents: 20 },   // 10 questions for $0.20
-    { quantity: 50, priceCents: 80 },   // 50 questions for $0.80
-    { quantity: 100, priceCents: 150 }, // 100 questions for $1.50
-  ];
 
   const [selectedOption, setSelectedOption] = useState(purchaseOptions[0]);
 

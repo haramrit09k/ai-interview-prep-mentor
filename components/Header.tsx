@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import type { UserProfile } from '../types';
 import { LogoutIcon, QuestionMarkCircleIcon, Bars3Icon } from './Icons';
+import PurchaseQuestionsModal from './PurchaseQuestionsModal';
+import { purchaseOptions } from '../config/purchaseOptions';
 import { BrainIcon } from './BrainIcon';
 import { GoogleLogin } from '@react-oauth/google';
 
@@ -14,17 +16,36 @@ interface HeaderProps {
     isAuthenticated: boolean; // New prop
     onPurchaseQuestions: (quantity: number) => void; // New prop
     onOpenWelcomeModal: () => void; // New prop for opening welcome modal
+    setShowPurchaseModal: (show: boolean) => void; // New prop to control purchase modal visibility
 }
 
-const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onPurchaseQuestions, onOpenWelcomeModal }) => {
+const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onPurchaseQuestions, onOpenWelcomeModal, setShowPurchaseModal }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(event.target as Node) && 
+                buttonRef.current && !buttonRef.current.contains(event.target as Node)) {
+                setIsMobileMenuOpen(false);
+            }
+        };
+
+        if (isMobileMenuOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        } else {
+            document.removeEventListener('mousedown', handleClickOutside);
+        }
+
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [isMobileMenuOpen]);
+
     const showQuotaWarning = isAuthenticated && questionsRemaining <= 10;
 
-    const purchaseOptions = [
-        { quantity: 10, priceCents: 20 },   // 10 questions for $0.20
-        { quantity: 50, priceCents: 80 },   // 50 questions for $0.80
-        { quantity: 100, priceCents: 150 }, // 100 questions for $1.50
-    ];
+    
 
     const [selectedQuantity, setSelectedQuantity] = useState(purchaseOptions[0].quantity);
 
@@ -37,13 +58,20 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                         <h1 className="text-base sm:text-lg font-bold text-text-primary ml-3 tracking-tight">ACE: AI Coach for Employment</h1>
                     </div>
                     <div className="flex items-center gap-2">
-                        {isAuthenticated && (
-                            <span className="text-xs sm:text-sm text-yellow-400 font-semibold text-right">
-                                {questionsRemaining} Qs Left!
-                            </span>
-                        )}
+                        {isAuthenticated &&
+                            (questionsRemaining < 5 ? (
+                                <span className="text-xs sm:text-sm text-red-500 font-semibold text-right">
+                                    {questionsRemaining} Qs Left!
+                                </span>
+                            ) : questionsRemaining >= 5 && questionsRemaining <= 15 ? (
+                                <span className="text-xs sm:text-sm text-yellow-400 font-semibold text-right">
+                                    {questionsRemaining} Qs Left!
+                                </span>
+                            ) : null)
+                        }
                         <div className="relative group md:hidden"> {/* Burger icon for small/medium screens */}
                             <button
+                                ref={buttonRef}
                                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                                 className="p-2 rounded-full text-text-secondary hover:bg-background-light hover:text-text-primary transition-colors"
                                 aria-label="Toggle navigation menu"
@@ -123,59 +151,10 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                 </div>
                 {/* Mobile menu */}
                 {isMobileMenuOpen && (
-                    <div className="md:hidden absolute top-16 right-0 w-full bg-background-medium/95 backdrop-blur-sm pb-4 z-30">
-                        <div className="flex flex-col items-end space-y-3">
-                            <button
-                                onClick={onOpenWelcomeModal}
-                                className="flex items-center gap-2 py-2 px-3 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors w-full justify-end"
-                            >
-                                <QuestionMarkCircleIcon className="w-5 h-5" /> Help & Instructions
-                            </button>
-                            {isAuthenticated && (
-                                <>
-                                    <div className="relative w-full">
-                                        <button
-                                            className="py-2 px-3 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-xs w-full text-right"
-                                            onClick={() => { /* Toggle purchase options if needed */ }}
-                                        >
-                                            Buy Questions
-                                        </button>
-                                        <div className="mt-2 bg-background-medium rounded-md shadow-lg py-1 z-50 w-full">
-                                            {purchaseOptions.map(option => (
-                                                <button
-                                                    key={option.quantity}
-                                                    onClick={() => {
-                                                        setSelectedQuantity(option.quantity);
-                                                        onPurchaseQuestions(option.quantity);
-                                                        setIsMobileMenuOpen(false); // Close menu after selection
-                                                    }}
-                                                    className="block w-full text-right px-4 py-2 text-sm text-text-primary hover:bg-background-light"
-                                                >
-                                                    {option.quantity} Questions (${(option.priceCents / 100).toFixed(2)})
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2 w-full justify-end">
-                                        <span className="text-text-secondary text-sm">
-                                            Welcome, {userProfile?.name.split(' ')[0]}!
-                                        </span>
-                                        <img
-                                            src={userProfile?.picture}
-                                            alt="User profile"
-                                            className="w-9 h-9 rounded-full border-2 border-brand-light"
-                                        />
-                                    </div>
-                                    <button
-                                        onClick={() => { onLogout(); setIsMobileMenuOpen(false); }}
-                                        className="flex items-center gap-2 py-2 px-3 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors w-full justify-end"
-                                    >
-                                        <LogoutIcon className="w-5 h-5" /> Logout
-                                    </button>
-                                </>
-                            )}
+                    <div ref={menuRef} className="md:hidden absolute top-16 right-0 w-full bg-background-medium/95 backdrop-blur-sm pb-4 z-30">
+                        <div className="flex flex-col items-center space-y-3 py-4 px-4">
                             {!isAuthenticated && isAuthEnabled && (
-                                <div className="w-full flex justify-end">
+                                <div className="w-full flex justify-center">
                                     <GoogleLogin
                                         onSuccess={(credentialResponse) => { onLoginSuccess(credentialResponse); setIsMobileMenuOpen(false); }}
                                         onError={() => {
@@ -188,9 +167,46 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                                 </div>
                             )}
                             {!isAuthEnabled && (
-                                <div className="py-1 px-2 rounded-md bg-yellow-900/50 text-yellow-300 text-xs font-semibold border border-yellow-700/50 w-full text-right">
+                                <div className="py-1 px-2 rounded-md bg-yellow-900/50 text-yellow-300 text-xs font-semibold border border-yellow-700/50 w-full max-w-xs text-center">
                                     Anon Mode
                                 </div>
+                            )}
+                            {isAuthenticated && userProfile && (
+                                <div className="flex flex-col items-center gap-2 w-full max-w-xs">
+                                    <img
+                                        src={userProfile.picture}
+                                        alt="User profile"
+                                        className="w-12 h-12 rounded-full border-2 border-brand-light"
+                                    />
+                                    <span className="text-text-primary text-base font-semibold text-center">
+                                        Welcome, {userProfile.name.split(' ')[0]}!
+                                    </span>
+                                    <span className="text-text-secondary text-sm">
+                                        You have {questionsRemaining} questions left.
+                                    </span>
+                                </div>
+                            )}
+                            {isAuthenticated && (
+                                <button
+                                    className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-sm w-full max-w-xs"
+                                    onClick={() => { setShowPurchaseModal(true); setIsMobileMenuOpen(false); }}
+                                >
+                                    Buy Questions
+                                </button>
+                            )}
+                            <button
+                                onClick={() => { onOpenWelcomeModal(); setIsMobileMenuOpen(false); }}
+                                className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors text-sm w-full max-w-xs"
+                            >
+                                <QuestionMarkCircleIcon className="w-5 h-5" /> Help & Instructions
+                            </button>
+                            {isAuthenticated && (
+                                <button
+                                    onClick={() => { onLogout(); setIsMobileMenuOpen(false); }}
+                                    className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors text-sm w-full max-w-xs"
+                                >
+                                    <LogoutIcon className="w-5 h-5" /> Logout
+                                </button>
                             )}
                         </div>
                     </div>

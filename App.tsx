@@ -12,6 +12,7 @@ import { LimitReachedModal } from './components/LimitReachedModal';
 import { WelcomeModal } from './components/WelcomeModal';
 import { SpinnerIcon } from './components/Icons';
 import ToastNotification from './components/ToastNotification';
+import PurchaseQuestionsModal from './components/PurchaseQuestionsModal';
 import { v4 as uuidv4 } from 'uuid';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
@@ -79,6 +80,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const [hasSeenWelcomeModalAuth, setHasSeenWelcomeModalAuth] = useState<boolean | null>(null);
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   
   const [authQuota, setAuthQuota] = useState<AuthQuota>({ questionsUsed: 0, lastResetDate: new Date().toISOString().split('T')[0] });
 
@@ -285,10 +287,11 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const endPracticeSession = useCallback(async () => {
     if (practiceSession && isAuthenticated) {
       if (!localStorage.getItem('google_id_token')) {
-        logger.warn('Authenticated user but no Google ID token found in localStorage. Cannot save unanswered questions.');
+        logger.warn('Authenticated user but no Google ID token found in localStorage. Cannot save unanswered questions or generate summary.');
         setPracticeSession(null);
         return;
       }
+
       const unansweredQuestions = practiceSession.questions.filter(q => !practiceSession.consumedQuestionIds.has(q.id));
 
       if (unansweredQuestions.length > 0) {
@@ -300,15 +303,53 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
             },
-            body: JSON.stringify({ unansweredQuestions }), // The backend now expects the full question objects
+            body: JSON.stringify({ unansweredQuestions }),
           });
         } catch (error) {
           logger.error('Error saving unanswered questions:', error);
         }
       }
+
+      // Generate and save revision summary
+      const relevantHistory = answerHistory.filter(h => h.skillId === practiceSession.skill.id);
+      const knownQuestions: string[] = [];
+      const unknownQuestions: string[] = [];
+
+      relevantHistory.forEach(entry => {
+        if (entry.outcome === 'correct' || entry.outcome === 'partially_correct') {
+          knownQuestions.push(entry.questionText);
+        } else {
+          unknownQuestions.push(entry.questionText);
+        }
+      });
+
+      try {
+        const response = await fetch('/api/revision-summary', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
+          },
+          body: JSON.stringify({
+            skillId: practiceSession.skill.id,
+            skillName: practiceSession.skill.name,
+            knownQuestions,
+            unknownQuestions,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          logger.error('Failed to save revision summary:', errorData.error);
+        } else {
+          logger.info(`Revision summary saved for skill ${practiceSession.skill.name} for user ${userId}.`);
+        }
+      } catch (error) {
+        logger.error('Error saving revision summary:', error);
+      }
     }
     setPracticeSession(null);
-  }, [practiceSession, isAuthenticated, userId]);
+  }, [practiceSession, isAuthenticated, userId, answerHistory]);
   
   const navigateQuestion = (direction: 'next' | 'prev') => {
     setPracticeSession(prevSession => {
@@ -426,6 +467,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         isAuthenticated={isAuthenticated}
         onPurchaseQuestions={handlePurchaseQuestions}
         onOpenWelcomeModal={() => setIsWelcomeModalOpen(true)}
+        setShowPurchaseModal={setShowPurchaseModal}
       />
       {isStartingSession && (
          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -467,7 +509,6 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       {revisionModal.isOpen && revisionModal.skill && (
         <RevisionSummaryModal
             skill={revisionModal.skill}
-            answerHistory={answerHistory}
             onClose={() => setRevisionModal({ isOpen: false, skill: null })}
         />
       )}
@@ -500,6 +541,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       )}
       {toastMessage && (
         <ToastNotification message={toastMessage} onClose={() => setToastMessage(null)} />
+      )}
+      {showPurchaseModal && (
+        <PurchaseQuestionsModal
+          onClose={() => setShowPurchaseModal(false)}
+          onPurchase={handlePurchaseQuestions}
+        />
       )}
     </div>
   );

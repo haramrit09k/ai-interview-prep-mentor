@@ -35,10 +35,10 @@ const SkillManagement: React.FC<SkillManagementProps> = ({
     <div className="max-w-4xl mx-auto p-4 md:p-8">
       <div className="bg-background-medium rounded-xl shadow-lg p-6 md:p-8 border border-background-light">
         <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
-          <h2 className="text-2xl font-bold text-text-primary">Your Skills</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-text-primary">Your Skills</h2>
           <button
             onClick={onOpenAddQuestionModal}
-            className="flex items-center gap-2 py-2 px-4 rounded-lg bg-brand-secondary text-white font-semibold hover:bg-purple-500 transition-colors"
+            className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-brand-secondary text-white font-semibold hover:bg-purple-500 transition-colors text-xs sm:text-sm w-full sm:w-auto"
           >
             <BookOpenIcon className="w-5 h-5" />
             Add Custom Question
@@ -51,12 +51,12 @@ const SkillManagement: React.FC<SkillManagementProps> = ({
             value={newSkill}
             onChange={(e) => setNewSkill(e.target.value)}
             placeholder={isSkillLimitReached ? "Skill limit reached" : "e.g., Apache Spark, MLOps..."}
-            className="flex-grow bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-3 disabled:cursor-not-allowed disabled:bg-gray-700"
+            className="flex-grow bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-2.5 text-sm disabled:cursor-not-allowed disabled:bg-gray-700"
             disabled={isSkillLimitReached}
           />
           <button
             type="submit"
-            className="flex items-center justify-center gap-2 w-full md:w-36 py-3 px-5 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
+            className="flex items-center justify-center gap-2 w-full md:w-36 py-2.5 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed text-sm"
             disabled={isSkillLimitReached || !newSkill.trim()}
           >
             <PlusIcon className="w-5 h-5" />
@@ -74,7 +74,7 @@ const SkillManagement: React.FC<SkillManagementProps> = ({
             skills.map(skill => (
               <div key={skill.id} className="bg-background-light p-3 sm:p-4 rounded-lg transition-all hover:bg-gray-600 hover:scale-[1.01]">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3">
-                  <span className="text-text-primary font-medium text-base sm:text-lg">{skill.name}</span>
+                  <span className="text-text-primary font-medium text-sm sm:text-base">{skill.name}</span>
                   <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 w-full sm:w-auto">
                     <div className="flex gap-2 w-full">
                       <button

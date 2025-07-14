@@ -32,7 +32,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
     
     return (
         <div 
-            className={`prose prose-invert max-w-none prose-p:text-text-secondary prose-li:text-text-secondary prose-p:text-sm sm:prose-p:text-base prose-li:text-sm sm:prose-li:text-base ${className || ''}`}
+            className={`prose prose-invert max-w-none prose-p:text-text-secondary prose-li:text-text-secondary prose-p:text-sm sm:prose-p:text-base prose-li:text-sm sm:prose-li:text-base prose-ul:list-disc prose-ul:pl-5 ${className || ''}`}
             dangerouslySetInnerHTML={{ __html: cleanHtml }} 
         />
     );

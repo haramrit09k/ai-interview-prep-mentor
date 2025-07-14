@@ -44,12 +44,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
 
     // onQuestionComplete is called, which will increment the official quota in App.tsx
     if (isIdk) {
-      onQuestionComplete({ question: currentQuestion, classification: 'idk' });
-      const answer = currentQuestion.source === 'custom' && currentQuestion.answer
-        ? currentQuestion.answer
-        : await generateAnswerForQuestion(currentQuestion.text);
-      setMentorAnswer(answer);
-      setFeedback("That's okay! The first step to learning is identifying what you don't know. Review the mentor's answer below.");
+      // When user clicks "I Don't Know", we still want to get concepts to review
+      // Pass an empty string as userAnswer to evaluateAnswer
+      const { mentorAnswer, feedback, classification, conceptsKnown, conceptsToReview } = await evaluateAnswer(currentQuestion.text, "");
+      setMentorAnswer(mentorAnswer);
+      setFeedback("That's okay! The first step to learning is identifying what you don't know. Review the mentor's answer below. " + feedback);
+      onQuestionComplete({ question: currentQuestion, classification: 'idk', conceptsKnown, conceptsToReview });
     } else {
       const { mentorAnswer, feedback, classification, conceptsKnown, conceptsToReview } = await evaluateAnswer(currentQuestion.text, userAnswer);
       setMentorAnswer(mentorAnswer);
@@ -196,14 +196,14 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
               <button
                 onClick={() => onNavigate('prev')}
                 disabled={session.currentQuestionIndex === 0}
-                className="flex items-center gap-2 py-2 px-4 rounded-md text-text-secondary hover:text-text-primary hover:bg-background-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto justify-center"
+                className="flex items-center gap-2 py-2 px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-background-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto justify-center border border-transparent hover:border-gray-600"
               >
                 <ChevronLeftIcon /> Previous
               </button>
               <button
                 onClick={() => onNavigate('next')}
                 disabled={session.currentQuestionIndex === session.questions.length - 1}
-                className="flex items-center gap-2 py-2 px-4 rounded-md text-text-secondary hover:text-text-primary hover:bg-background-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto justify-center"
+                className="flex items-center gap-2 py-2 px-4 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-light disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors w-full sm:w-auto justify-center"
               >
                 Next <ChevronRightIcon />
               </button>

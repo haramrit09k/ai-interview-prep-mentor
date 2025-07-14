@@ -14,7 +14,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ onClose }) => {
             <XIcon className="w-5 h-5" />
           </button>
           <h2 className="text-xl font-bold text-brand-light mb-3">Welcome to ACE: AI Coach for Employment!</h2>
-          <div className="text-text-secondary space-y-3 text-sm">
+          <div className="text-text-secondary space-y-3 text-sm max-h-[70vh] overflow-y-auto pr-2"> {/* Added max-h and overflow for scrollability */}
             <p>This app is designed to help you ace your technical interviews by practicing with AI-generated questions and getting instant feedback.</p>
             <p>Here's how to get started:</p>
             <ul className="list-disc list-inside ml-4 space-y-2">
