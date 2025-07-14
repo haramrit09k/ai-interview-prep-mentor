@@ -6,69 +6,75 @@ import MarkdownRenderer from './MarkdownRenderer';
 
 interface RevisionSummaryModalProps {
   skill: Skill;
-  answerHistory: AnswerHistory[];
   onClose: () => void;
 }
 
-const RevisionSummaryModal: React.FC<RevisionSummaryModalProps> = ({ skill, answerHistory, onClose }) => {
+const RevisionSummaryModal: React.FC<RevisionSummaryModalProps> = ({ skill, onClose }) => {
   const [isLoading, setIsLoading] = useState(true);
-  const [aggregatedConcepts, setAggregatedConcepts] = useState<{ known: string[]; review: string[]; } | null>(null);
+  const [summary, setSummary] = useState<{ conceptsKnown: string; conceptsToReview: string; } | null>(null);
 
   useEffect(() => {
-    setIsLoading(true);
-    const relevantHistory = answerHistory.filter(h => h.skillId === skill.id);
+    const fetchSummary = async () => {
+      setIsLoading(true);
+      try {
+        const response = await fetch(`/api/revision-summary/${skill.id}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
+          },
+        });
 
-    const known: Set<string> = new Set();
-    const review: Set<string> = new Set();
+        if (response.ok) {
+          const data = await response.json();
+          setSummary(data);
+        } else if (response.status === 404) {
+          setSummary({
+            conceptsKnown: 'No revision summary available yet. Complete a practice session for this skill to generate one.',
+            conceptsToReview: 'No revision summary available yet. Complete a practice session for this skill to generate one.',
+          });
+        } else {
+          console.error('Error fetching revision summary:', response.statusText);
+          setSummary({
+            conceptsKnown: 'Could not load summary due to an error.',
+            conceptsToReview: 'Could not load summary due to an error.',
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching revision summary:', error);
+        setSummary({
+          conceptsKnown: 'Could not load summary due to a network error.',
+          conceptsToReview: 'Could not load summary due to a network error.',
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-    relevantHistory.forEach(entry => {
-      entry.conceptsKnown?.forEach(concept => {
-        known.add(concept);
-      });
-      entry.conceptsToReview?.forEach(concept => {
-        review.add(concept);
-      });
-    });
-
-    // Filter out concepts that are in both known and review (prioritize review if ambiguous)
-    const finalKnown = Array.from(known).filter(concept => !review.has(concept));
-    const finalReview = Array.from(review);
-
-    setAggregatedConcepts({ known: finalKnown, review: finalReview });
-    setIsLoading(false);
-  }, [skill.id, answerHistory]);
+    fetchSummary();
+  }, [skill.id]);
 
   const renderContent = () => {
     if (isLoading) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[250px] text-text-secondary">
           <SpinnerIcon className="w-10 h-10 border-4 border-brand-primary" />
-          <p className="mt-4 text-lg">Aggregating your revision summary...</p>
+          <p className="mt-4 text-lg">Generating your personalized revision summary...</p>
         </div>
       );
     }
     
-    if (aggregatedConcepts) {
-      const knownContent = aggregatedConcepts.known.length > 0 
-        ? aggregatedConcepts.known.map(c => `- ${c}`).join('\n')
-        : 'No specific concepts identified as known yet.';
-
-      const reviewContent = aggregatedConcepts.review.length > 0 
-        ? aggregatedConcepts.review.map(c => `- ${c}`).join('\n')
-        : 'No specific concepts identified for review yet.';
-
+    if (summary) {
       return (
         <div className="space-y-8">
           <div>
             <h3 className="text-lg font-bold text-brand-light mb-2">Concepts You Knew</h3>
             <div className="bg-background-dark/50 p-3 rounded-lg text-sm">
-              <MarkdownRenderer content={knownContent} />
+              <MarkdownRenderer content={summary.conceptsKnown} />
             </div>
           </div>
           <div>
             <h3 className="text-lg font-bold text-yellow-400 mb-2">Concepts to Review</h3>
             <div className="bg-background-dark/50 p-3 rounded-lg text-sm">
-              <MarkdownRenderer content={reviewContent} />
+              <MarkdownRenderer content={summary.conceptsToReview} />
             </div>
           </div>
         </div>

@@ -5,6 +5,7 @@ const path = require('path');
 const pool = require('./db');
 const { authMiddleware } = require('./auth');
 const { generateQuestionsForSkill } = require('./geminiService');
+const { generateRevisionSummary } = require('./summaryService');
 const Stripe = require('stripe');
 
 const app = express();
@@ -180,6 +181,61 @@ app.post('/api/questions/save-unanswered', express.json(), authMiddleware, async
     res.status(200).send('Unanswered questions saved');
   } catch (err) {
     logger.error(`POST /api/questions/save-unanswered: Error for user ${req.userId}:`, err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+app.post('/api/revision-summary', express.json(), authMiddleware, async (req, res) => {
+  logger.debug(`POST /api/revision-summary: User ID: ${req.userId}`);
+  const { skillId, skillName, knownQuestions, unknownQuestions } = req.body;
+
+  if (!skillId || !skillName || !Array.isArray(knownQuestions) || !Array.isArray(unknownQuestions)) {
+    logger.warn(`POST /api/revision-summary: Invalid request parameters for user ${req.userId}.`)
+    return res.status(400).send('Missing skillId, skillName, knownQuestions, or unknownQuestions');
+  }
+
+  try {
+    logger.debug(`Generating summary for skill: ${skillName}, known: ${knownQuestions.length}, unknown: ${unknownQuestions.length}`);
+    const generatedSummary = await generateRevisionSummary(skillName, knownQuestions, unknownQuestions);
+    logger.debug(`Generated summary:`, generatedSummary);
+
+    const { rows } = await pool.query('SELECT revision_summaries FROM users WHERE id = $1', [req.userId]);
+    let summaries = {};
+    if (rows.length > 0 && rows[0].revision_summaries) {
+      summaries = JSON.parse(rows[0].revision_summaries);
+    }
+
+    summaries[skillId] = { ...generatedSummary, lastUpdated: new Date().toISOString() };
+
+    await pool.query('UPDATE users SET revision_summaries = $1 WHERE id = $2', [JSON.stringify(summaries), req.userId]);
+    logger.info(`POST /api/revision-summary: Saved summary for skill ${skillId} for user ${req.userId}.`);
+    res.status(200).send('Revision summary saved');
+  } catch (err) {
+    logger.error(`POST /api/revision-summary: Error for user ${req.userId}:`, err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+app.get('/api/revision-summary/:skillId', authMiddleware, async (req, res) => {
+  logger.debug(`GET /api/revision-summary/:skillId: User ID: ${req.userId}`);
+  const { skillId } = req.params;
+
+  try {
+    const { rows } = await pool.query('SELECT revision_summaries FROM users WHERE id = $1', [req.userId]);
+    let summaries = {};
+    if (rows.length > 0 && rows[0].revision_summaries) {
+      summaries = JSON.parse(rows[0].revision_summaries);
+    }
+
+    if (summaries[skillId]) {
+      logger.info(`GET /api/revision-summary/:skillId: Found summary for skill ${skillId} for user ${req.userId}.`);
+      res.json(summaries[skillId]);
+    } else {
+      logger.info(`GET /api/revision-summary/:skillId: No summary found for skill ${skillId} for user ${req.userId}.`);
+      res.status(404).send('Revision summary not found');
+    }
+  } catch (err) {
+    logger.error(`GET /api/revision-summary/:skillId: Error for user ${req.userId}:`, err.message);
     res.status(500).send('Server Error');
   }
 });

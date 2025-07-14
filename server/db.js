@@ -117,6 +117,15 @@ db.query(createTableSql)
           } else {
             logger.info('unanswered_questions column already exists.');
           }
+
+          // Add revision_summaries column
+          const revisionSummariesExists = columns.some(col => col.name === 'revision_summaries');
+          if (!revisionSummariesExists) {
+            logger.info('Adding revision_summaries column to users table.');
+            promises.push(db.query(`ALTER TABLE users ADD COLUMN revision_summaries TEXT;`));
+          } else {
+            logger.info('revision_summaries column already exists.');
+          }
           return Promise.all(promises);
         });
     }

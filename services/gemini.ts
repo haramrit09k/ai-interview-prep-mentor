@@ -115,10 +115,11 @@ export const evaluateAnswer = async (questionText: string, userAnswer: string): 
     }
 };
 
-export const generateRevisionSummary = async (knownQuestions: string[], unknownQuestions: string[]): Promise<{ conceptsKnown: string; conceptsToReview: string; }> => {
+const generateRevisionSummary = async (skillName: string, knownQuestions: string[], unknownQuestions: string[]): Promise<{ conceptsKnown: string; conceptsToReview: string; }> => {
   logger.debug('Generating revision summary.', { knownQuestions, unknownQuestions });
   try {
-    const prompt = `You are an expert learning assistant. A user has practiced a skill and you need to create a revision summary based on their performance.\n\nI will provide you with two lists of questions:\n1. Questions they knew or partially knew the answer to.\n2. Questions they did not know the answer to or got incorrect.\n\nYour task is to:\n- Analyze each list of questions.\n- Identify the core concepts or topics being tested in each list.\n- Generate a concise summary for each list in markdown bullet points.\n- The summary should not just be a list of the questions, but a synthesis of the underlying topics.\n\nQuestions the user KNEW:\n---\n- ${knownQuestions.join('\n- ')}\n---\n\nQuestions the user DID NOT KNOW:\n---\n- ${unknownQuestions.join('\n- ')}\n---\n\nReturn a JSON object with two keys:\n- "conceptsKnown": A summary of topics the user is comfortable with (string, markdown formatted).\n- "conceptsToReview": A summary of topics the user should focus on for revision (string, markdown formatted).`;
+    const prompt = `You are an expert learning assistant. A user has practiced the skill "${skillName}" and you need to create a revision summary based on their performance.\n\nI will provide you with two lists of questions:\n1. Questions they knew or partially knew the answer to.\n2. Questions they did not know the answer to or got incorrect.\n\nYour task is to:\n- Analyze each list of questions, considering the skill "${skillName}".\n- Identify the core concepts or topics being tested in each list that are *specific to the skill "${skillName}"*.\n- Generate a *very concise and actionable* summary for each list using markdown bullet points. Each bullet point MUST start with a hyphen and a space, and each bullet point MUST be on a new line. DO NOT combine bullet points onto a single line. The output for "conceptsKnown" and "conceptsToReview" should ONLY contain these bullet points, with no introductory text.\n  Example:\n  - Concept One\n  - Another Concept\n  - Third Concept\n- Each bullet point should be a key concept or topic, not a detailed explanation.\n- The summary should synthesize the underlying topics, not just list questions.\n- Aim for 1-3 bullet points per section, if possible.\n\nQuestions the user KNEW:\n---\n- ${knownQuestions.join('\n- ')}\n---\n\nQuestions the user DID NOT KNOW:\n---\n- ${unknownQuestions.join('\n- ')}\n---\n\nReturn a JSON object with two keys:\n- "conceptsKnown": A very concise summary of topics the user is comfortable with (string, markdown formatted, ONLY bullet points).\n- "conceptsToReview": A very concise summary of topics the user should focus on for revision (string, markdown formatted, ONLY bullet points).`;
+
 
     const response = await ai.models.generateContent({
       model,
@@ -155,7 +156,21 @@ export const generateRevisionSummary = async (knownQuestions: string[], unknownQ
     if (!jsonStr) {
       throw new Error('Received empty summary from API');
     }
-    return JSON.parse(jsonStr);
+    const result = JSON.parse(jsonStr);
+
+    // Post-process to ensure bullet points are on new lines
+    const formatConcepts = (concepts: string) => {
+      if (!concepts) return '';
+      // Split by common bullet point indicators and filter out empty strings
+      const parts = concepts.split(/\s*-\s*/).filter(part => part.trim() !== '');
+      // Rejoin with explicit markdown bullet points on new lines
+      return parts.map(part => `- ${part.trim()}`).join('\n');
+    };
+
+    return {
+      conceptsKnown: formatConcepts(result.conceptsKnown),
+      conceptsToReview: formatConcepts(result.conceptsToReview),
+    };
   } catch (error) {
     logger.error('Error generating revision summary:', error);
     return {
