@@ -67,6 +67,10 @@ const generateRevisionSummary = async (skillName, knownQuestions, unknownQuestio
 
     logger.debug('Gemini API response for revision summary:', JSON.stringify(response, null, 2));
 
+    if (!response || !response.response) {
+      throw new Error('Invalid or empty response from Gemini API');
+    }
+
     const responseText = response.response.text();
     const jsonStr = cleanJsonString(responseText ?? "");
     if (!jsonStr) {
