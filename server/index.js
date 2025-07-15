@@ -9,6 +9,7 @@ const { generateRevisionSummary } = require('./summaryService');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -189,7 +190,9 @@ app.post('/api/evaluate', express.json(), authMiddleware, rateLimiter, async (re
   }
 
   try {
-    const cacheKey = `evaluation:${questionText}`;
+    // Create a hash of the user's answer to use in the cache key
+    const answerHash = crypto.createHash('sha256').update(userAnswer).digest('hex');
+    const cacheKey = `evaluation:${questionText}:${answerHash}`;
     const cachedEvaluation = await redisClient.get(cacheKey);
 
     if (cachedEvaluation) {
