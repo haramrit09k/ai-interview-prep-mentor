@@ -4,9 +4,11 @@ const cors = require('cors');
 const path = require('path');
 const pool = require('./db');
 const { authMiddleware } = require('./auth');
-const { generateQuestionsForSkill } = require('./geminiService');
+const { generateQuestionsForSkill, evaluateAnswer } = require('./geminiService');
 const { generateRevisionSummary } = require('./summaryService');
 const Stripe = require('stripe');
+const redisClient = require('./redisClient');
+const { rateLimiter } = require('./rateLimiter');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -95,7 +97,7 @@ app.post('/api/user/seen-welcome-modal', express.json(), authMiddleware, async (
   }
 });
 
-app.get('/api/questions', authMiddleware, async (req, res) => {
+app.get('/api/questions', authMiddleware, rateLimiter, async (req, res) => {
   logger.debug(`GET /api/questions: User ID: ${req.userId}`);
   const { skillName, level, count, skillId } = req.query; // skillId is now expected
   const requestedCount = parseInt(count, 10);
@@ -106,6 +108,16 @@ app.get('/api/questions', authMiddleware, async (req, res) => {
   }
 
   try {
+    const cacheKey = `questions:${skillName}:${level}:${count}`;
+    const cachedQuestions = await redisClient.get(cacheKey);
+
+    if (cachedQuestions) {
+      logger.info(`Cache hit for key: ${cacheKey}`);
+      return res.json({ questions: JSON.parse(cachedQuestions) });
+    }
+
+    logger.info(`Cache miss for key: ${cacheKey}`);
+
     const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
     let storedQuestionMap = {};
     if (rows.length > 0 && rows[0].unanswered_questions) {
@@ -136,11 +148,45 @@ app.get('/api/questions', authMiddleware, async (req, res) => {
     await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
     logger.info(`GET /api/questions: Updated unanswered questions in DB for user ${req.userId}.`);
 
+    await redisClient.set(cacheKey, JSON.stringify(questionsToReturn), { EX: 86400 });
+    logger.info(`Cached questions for key: ${cacheKey}`);
+
     res.json({ questions: questionsToReturn });
 
   } catch (err) {
     logger.error(`GET /api/questions: Error for user ${req.userId}:`, err.message);
     res.status(500).send('Server Error');
+  }
+});
+
+
+app.post('/api/evaluate', express.json(), authMiddleware, rateLimiter, async (req, res) => {
+  const { questionText, userAnswer } = req.body;
+
+  if (!questionText || userAnswer === undefined) {
+    return res.status(400).send('Missing questionText or userAnswer');
+  }
+
+  try {
+    const cacheKey = `evaluation:${questionText}`;
+    const cachedEvaluation = await redisClient.get(cacheKey);
+
+    if (cachedEvaluation) {
+      logger.info(`Cache hit for evaluation: ${cacheKey}`);
+      return res.json(JSON.parse(cachedEvaluation));
+    }
+
+    logger.info(`Cache miss for evaluation: ${cacheKey}`);
+
+    const evaluation = await evaluateAnswer(questionText, userAnswer);
+
+    await redisClient.set(cacheKey, JSON.stringify(evaluation), { EX: 604800 }); // Cache for 7 days
+    logger.info(`Cached evaluation for key: ${cacheKey}`);
+
+    res.json(evaluation);
+  } catch (error) {
+    logger.error('Error in /api/evaluate:', error);
+    res.status(500).send('Error evaluating answer');
   }
 });
 

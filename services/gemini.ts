@@ -1,5 +1,4 @@
-import { GoogleGenAI, Type, GenerateContentResponse, HarmCategory, HarmBlockThreshold } from "@google/genai";
-import type { EvaluationResponse } from '../types';
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold, type GenerateContentResponse, type EvaluationResponse } from "@google/genai";
 import logger from '../src/logger'; // Import the logger
 
 const API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -13,22 +12,7 @@ const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 const model = 'gemini-2.5-flash';
 
-/**
- * Cleans a string that might contain a JSON object wrapped in markdown.
- * e.g., ```json\n{"key": "value"}\n``` -> {"key": "value"}
- * @param str The string to clean.
- * @returns A cleaned string, ready for parsing.
- */
-const cleanJsonString = (str: string): string => {
-  let cleaned = str.trim();
-  if (cleaned.startsWith('```json')) {
-    cleaned = cleaned.substring(7);
-    if (cleaned.endsWith('```')) {
-      cleaned = cleaned.slice(0, -3);
-    }
-  }
-  return cleaned.trim();
-};
+
 
 export const generateAnswerForQuestion = async (questionText: string): Promise<string> => {
   logger.debug('Generating answer for question:', questionText);
@@ -57,62 +41,42 @@ export const generateAnswerForQuestion = async (questionText: string): Promise<s
   }
 };
 
+
 export const evaluateAnswer = async (questionText: string, userAnswer: string): Promise<EvaluationResponse> => {
-    logger.debug('Evaluating answer for question:', questionText);
-    try {
-        // Truncate userAnswer to prevent excessively long inputs
-        const MAX_USER_ANSWER_LENGTH = 5000; // Approximately 1000 words
-        const truncatedUserAnswer = userAnswer.length > MAX_USER_ANSWER_LENGTH 
-            ? userAnswer.substring(0, MAX_USER_ANSWER_LENGTH) 
-            : userAnswer;
-
-        const prompt = `You are an expert interview mentor. A user is practicing for an interview.\nHere is the question they were asked, and the answer they provided.\n\nQuestion:\n---\n${questionText}\n---\n\nUser's Answer:\n---\n${truncatedUserAnswer}\n---\n\nYour tasks are:\n1. First, provide an ideal, concise answer to the question. Be brief and to the point. Use markdown for formatting and include code examples only if essential.\n2. Second, evaluate the user's answer. Provide concise, constructive feedback. Focus on the most important points for improvement. Use markdown.\n3. Third, classify the user's answer as 'correct', 'partially_correct', or 'incorrect'.\n4. Fourth, identify specific technical concepts or keywords that the user demonstrated understanding of in their answer. List them as an array of strings. If no concepts were demonstrated, return an empty array.\n5. Fifth, identify specific technical concepts or keywords related to the question that the user missed, misunderstood, or should review. List them as an array of strings. If no concepts were missed, return an empty array.\n\nReturn a JSON object with five keys:\n- "mentorAnswer": The ideal, concise answer (string, markdown formatted).\n- "feedback": Your concise, constructive feedback for the user (string, markdown formatted).\n- "classification": Your classification ('correct', 'partially_correct', 'incorrect').\n- "conceptsKnown": An array of strings, listing concepts the user demonstrated understanding of.\n- "conceptsToReview": An array of strings, listing concepts the user missed or should review.`;
-
-        const response: GenerateContentResponse = await ai.models.generateContent({
-            model: model,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                maxOutputTokens: 1500,
-                safetySettings: [
-                  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-                  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-                  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-                  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-                ],
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        mentorAnswer: { type: Type.STRING },
-                        feedback: { type: Type.STRING },
-                        classification: { type: Type.STRING, enum: ['correct', 'partially_correct', 'incorrect'] },
-                        conceptsKnown: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        conceptsToReview: { type: Type.ARRAY, items: { type: Type.STRING } }
-                    },
-                    required: ["mentorAnswer", "feedback", "classification", "conceptsKnown", "conceptsToReview"]
-                }
-            }
-        });
-
-        logger.debug('Gemini API response for evaluation:', response);
-
-        const jsonStr = cleanJsonString(response.text ?? "");
-        if (!jsonStr) {
-          throw new Error("Received empty response from evaluation API");
-        }
-        const result = JSON.parse(jsonStr);
-        
-        return result as EvaluationResponse;
-    } catch (error) {
-        logger.error("Error evaluating answer:", error);
-        return {
-            mentorAnswer: "Sorry, I encountered an error while generating an answer. Please try again.",
-            feedback: "Could not evaluate your answer due to an error.",
-            classification: 'incorrect',
-            conceptsKnown: [],
-            conceptsToReview: []
-        };
+  logger.debug('Sending evaluation request to backend for question:', questionText);
+  try {
+    const token = localStorage.getItem('google_id_token');
+    if (!token) {
+      throw new Error('User is not authenticated.');
     }
+
+    const response = await fetch('/api/evaluate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ questionText, userAnswer }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Failed to evaluate answer');
+    }
+
+    const result = await response.json();
+    return result as EvaluationResponse;
+
+  } catch (error) {
+    logger.error("Error evaluating answer:", error);
+    return {
+        mentorAnswer: "Sorry, I encountered an error while generating an answer. Please try again.",
+        feedback: "Could not evaluate your answer due to an error.",
+        classification: 'incorrect',
+        conceptsKnown: [],
+        conceptsToReview: []
+    };
+  }
 };
 
 const generateRevisionSummary = async (skillName: string, knownQuestions: string[], unknownQuestions: string[]): Promise<{ conceptsKnown: string; conceptsToReview: string; }> => {
