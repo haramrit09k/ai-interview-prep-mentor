@@ -130,7 +130,7 @@ app.get('/api/questions', authMiddleware, rateLimiter, async (req, res) => {
   }
 
   try {
-    const cacheKey = `questions:${skillName}:${level}:${count}`;
+    const cacheKey = `questions:${req.userId}:${skillName}:${level}:${count}`;
     const cachedQuestions = await redisClient.get(cacheKey);
 
     if (cachedQuestions) {
