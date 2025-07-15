@@ -8,6 +8,14 @@ const clientOptions = {
   url: process.env.REDIS_URL
 };
 
+// For Heroku Redis, which uses self-signed certificates, we need to disable the certificate check.
+if (process.env.REDIS_URL && process.env.REDIS_URL.startsWith('rediss://')) {
+  clientOptions.socket = {
+    tls: true,
+    rejectUnauthorized: false
+  };
+}
+
 const redisClient = redis.createClient(clientOptions);
 
 redisClient.on('connect', () => {
