@@ -130,16 +130,6 @@ app.get('/api/questions', authMiddleware, rateLimiter, async (req, res) => {
   }
 
   try {
-    const cacheKey = `questions:${req.userId}:${skillName}:${level}:${count}`;
-    const cachedQuestions = await redisClient.get(cacheKey);
-
-    if (cachedQuestions) {
-      logger.info(`Cache hit for key: ${cacheKey}`);
-      return res.json({ questions: JSON.parse(cachedQuestions) });
-    }
-
-    logger.info(`Cache miss for key: ${cacheKey}`);
-
     const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
     let storedQuestionMap = {};
     if (rows.length > 0 && rows[0].unanswered_questions) {
@@ -169,9 +159,6 @@ app.get('/api/questions', authMiddleware, rateLimiter, async (req, res) => {
 
     await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
     logger.info(`GET /api/questions: Updated unanswered questions in DB for user ${req.userId}.`);
-
-    await redisClient.set(cacheKey, JSON.stringify(questionsToReturn), { EX: 86400 });
-    logger.info(`Cached questions for key: ${cacheKey}`);
 
     res.json({ questions: questionsToReturn });
 
