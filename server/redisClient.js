@@ -2,10 +2,13 @@
 const redis = require('redis');
 const logger = require('./logger');
 
-const redisClient = redis.createClient({
-  // By default, it connects to redis://127.0.0.1:6379
-  // Heroku will provide a REDIS_URL environment variable that the client will automatically use.
-});
+// Heroku provides the REDIS_URL environment variable.
+// The node-redis client needs this URL to be passed explicitly.
+const clientOptions = {
+  url: process.env.REDIS_URL
+};
+
+const redisClient = redis.createClient(clientOptions);
 
 redisClient.on('connect', () => {
   logger.info('Connected to Redis');
