@@ -31,8 +31,32 @@ const cleanJsonString = (str) => {
 
 const generateRevisionSummary = async (skillName, knownQuestions, unknownQuestions) => {
   logger.debug('Generating revision summary.', { skillName, knownQuestions, unknownQuestions });
+
+  // If there are no questions, don't call the API.
+  if (knownQuestions.length === 0 && unknownQuestions.length === 0) {
+    logger.info('No questions provided for revision summary. Returning default message.');
+    return {
+      conceptsKnown: 'No questions were answered in this session.',
+      conceptsToReview: 'Complete a few questions to get a personalized revision plan.',
+    };
+  }
+
   try {
-    const prompt = `You are an expert learning assistant. A user has practiced the skill "${skillName}" and you need to create a revision summary based on their performance.\n\nI will provide you with two lists of questions:\n1. Questions they knew or partially knew the answer to.\n2. Questions they did not know the answer to or got incorrect.\n\nYour task is to:\n- Analyze each list of questions, considering the skill "${skillName}".\n- Identify the core concepts or topics being tested in each list that are *specific to the skill "${skillName}"*.\n- Generate a *very concise and actionable* summary for each list. Return the concepts as an array of strings, not a single markdown string.\n- Each item in the array should be a key concept or topic, not a detailed explanation.\n- The summary should synthesize the underlying topics, not just list questions.\n- Aim for 1-3 concepts per section, if possible.\n\nQuestions the user KNEW:\n---\n- ${knownQuestions.join('\n- ')}\n---\n\nQuestions the user DID NOT KNOW:\n---\n- ${unknownQuestions.join('\n- ')}\n---\n\nReturn a JSON object with two keys:\n- "conceptsKnown": An array of strings, representing concepts the user is comfortable with.\n- "conceptsToReview": An array of strings, representing concepts the user should focus on for revision.`;
+    let prompt = `You are an expert learning assistant. A user has practiced the skill "${skillName}" and you need to create a revision summary based on their performance.\n\nI will provide you with lists of questions based on their answers.\n\nYour task is to:\n- Analyze the questions, considering the skill "${skillName}".\n- Identify the core concepts or topics being tested. Return the concepts as an array of strings.\n- Each item in the array should be a key concept or topic, not a detailed explanation.\n- The summary should synthesize the underlying topics, not just list questions.\n- Aim for 1-3 concepts per section, if possible.\n\n`;
+
+    if (knownQuestions.length > 0) {
+      prompt += `Questions the user KNEW:\n---\n- ${knownQuestions.join('\n- ')}\n---\n\n`;
+    } else {
+      prompt += `The user did not have any questions they knew.\n\n`;
+    }
+
+    if (unknownQuestions.length > 0) {
+      prompt += `Questions the user DID NOT KNOW:\n---\n- ${unknownQuestions.join('\n- ')}\n---\n\n`;
+    } else {
+      prompt += `The user did not have any questions they did not know.\n\n`;
+    }
+
+    prompt += `Return a JSON object with two keys:\n- "conceptsKnown": An array of strings, representing concepts the user is comfortable with. If there were no known questions, return an empty array.\n- "conceptsToReview": An array of strings, representing concepts the user should focus on for revision. If there were no unknown questions, return an empty array.`;
 
     const response = await ai.models.generateContent({
       model,
