@@ -84,10 +84,8 @@ const generateRevisionSummary = async (skillName, knownQuestions, unknownQuestio
     };
   } catch (error) {
     logger.error('Error generating revision summary:', error);
-    return {
-      conceptsKnown: 'Could not generate summary due to an error.',
-      conceptsToReview: 'Could not generate summary due to an error.',
-    };
+    // Re-throw the error to be caught by the route handler
+    throw error;
   }
 };
 
