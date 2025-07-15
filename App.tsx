@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import useLocalStorage from './hooks/useLocalStorage';
 import type { Skill, Question, AnswerOutcome, ExperienceLevel, AnswerHistory, UserProfile } from './types';
 
@@ -141,6 +141,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const [limitModal, setLimitModal] = useState<{ isOpen: boolean; reason: 'skills' | 'sessions' | 'quota' | null }>({ isOpen: false, reason: null });
   const [practiceOptions, setPracticeOptions] = useState<{ isOpen: boolean; skill: Skill | null }>({ isOpen: false, skill: null });
   const [revisionModal, setRevisionModal] = useState<{ isOpen: boolean; skill: Skill | null }>({ isOpen: false, skill: null });
+
+  // Create a ref to hold the latest answer history to avoid stale closures in callbacks
+  const answerHistoryRef = useRef(answerHistory);
+  useEffect(() => {
+    answerHistoryRef.current = answerHistory;
+  }, [answerHistory]);
 
   const handleLoginSuccess = useCallback((credentialResponse: any) => {
     try {
@@ -311,10 +317,10 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       }
 
       // Generate and save revision summary
-      const relevantHistory = answerHistory.filter(h => h.skillId === practiceSession.skill.id);
+      const relevantHistory = answerHistoryRef.current.filter(h => h.skillId === practiceSession.skill.id);
       const knownQuestions: string[] = [];
       const unknownQuestions: string[] = [];
-
+      
       relevantHistory.forEach(entry => {
         if (entry.outcome === 'correct' || entry.outcome === 'partially_correct') {
           knownQuestions.push(entry.questionText);
@@ -349,7 +355,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       }
     }
     setPracticeSession(null);
-  }, [practiceSession, isAuthenticated, userId, answerHistory]);
+  }, [practiceSession, isAuthenticated, userId]);
   
   const navigateQuestion = (direction: 'next' | 'prev') => {
     setPracticeSession(prevSession => {
