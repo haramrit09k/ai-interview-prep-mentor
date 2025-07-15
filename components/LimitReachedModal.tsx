@@ -50,13 +50,23 @@ export const LimitReachedModal: React.FC<LimitReachedModalProps> = ({ onClose, o
                       key={option.quantity}
                       type="button"
                       onClick={() => setSelectedOption(option)}
-                      className={`py-2 px-3 rounded-lg text-sm font-semibold transition-colors
+                      className={`py-2 px-3 rounded-lg text-sm font-semibold transition-colors flex justify-between items-center relative
                         ${selectedOption.quantity === option.quantity
                           ? 'bg-brand-primary text-white ring-2 ring-brand-light'
                           : 'bg-background-light hover:bg-gray-600 text-text-primary'
-                        }`}
+                        }
+                        ${option.highlight ? 'border-2 border-yellow-400 shadow-lg' : ''}
+                      `}
                     >
-                      {option.quantity} Questions (${(option.priceCents / 100).toFixed(2)})
+                      <span>{option.quantity} Questions</span>
+                      <span className="flex items-center gap-2">
+                        {option.savingsText && (
+                          <span className="text-xs font-bold text-yellow-400 bg-yellow-400/20 px-2 py-1 rounded-full">
+                            {option.savingsText}
+                          </span>
+                        )}
+                        <span>${(option.priceCents / 100).toFixed(2)}</span>
+                      </span>
                     </button>
                   ))}
                 </div>

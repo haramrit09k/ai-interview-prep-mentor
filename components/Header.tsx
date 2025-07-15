@@ -103,9 +103,16 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                                                     setSelectedQuantity(option.quantity);
                                                     onPurchaseQuestions(option.quantity);
                                                 }}
-                                                className="block w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-background-light"
+                                                className={`block w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-background-light relative flex justify-between items-center
+                                                  ${option.highlight ? 'bg-yellow-400/10' : ''}
+                                                `}
                                             >
-                                                {option.quantity} Questions (${(option.priceCents / 100).toFixed(2)})
+                                                <span>{option.quantity} Questions (${(option.priceCents / 100).toFixed(2)})</span>
+                                                {option.shortSavingsText && (
+                                                  <span className="text-xs font-bold text-yellow-400 bg-yellow-400/20 px-2 py-1 rounded-full ml-2">
+                                                    {option.shortSavingsText}
+                                                  </span>
+                                                )}
                                             </button>
                                         ))}
                                     </div>

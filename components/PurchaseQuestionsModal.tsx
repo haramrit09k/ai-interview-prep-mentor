@@ -29,14 +29,23 @@ const PurchaseQuestionsModal: React.FC<PurchaseQuestionsModalProps> = ({ onClose
                 key={option.quantity}
                 type="button"
                 onClick={() => setSelectedOption(option)}
-                className={`w-full py-2 px-3 rounded-lg text-sm font-semibold transition-colors flex justify-between items-center
+                className={`w-full py-2 px-3 rounded-lg text-sm font-semibold transition-colors flex justify-between items-center relative
                   ${selectedOption.quantity === option.quantity
                     ? 'bg-brand-primary text-white ring-2 ring-brand-light'
                     : 'bg-background-light hover:bg-gray-600 text-text-primary'
-                  }`}
+                  }
+                  ${option.highlight ? 'border-2 border-yellow-400 shadow-lg' : ''}
+                `}
               >
                 <span>{option.quantity} Questions</span>
-                <span>${(option.priceCents / 100).toFixed(2)}</span>
+                <span className="flex items-center gap-2">
+                  {option.savingsText && (
+                    <span className="text-xs font-bold text-yellow-400 bg-yellow-400/20 px-2 py-1 rounded-full">
+                      {option.savingsText}
+                    </span>
+                  )}
+                  <span>${(option.priceCents / 100).toFixed(2)}</span>
+                </span>
               </button>
             ))}
           </div>
