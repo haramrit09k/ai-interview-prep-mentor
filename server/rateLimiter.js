@@ -3,7 +3,7 @@ const redisClient = require('./redisClient');
 const logger = require('./logger');
 
 const WINDOW_SIZE_IN_HOURS = 1;
-const MAX_WINDOW_REQUEST_COUNT = 10;
+const MAX_WINDOW_REQUEST_COUNT = 100;
 const WINDOW_LOG_INTERVAL_IN_SECONDS = 3600; // 1 hour
 
 const rateLimiter = async (req, res, next) => {
