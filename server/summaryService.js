@@ -65,9 +65,10 @@ const generateRevisionSummary = async (skillName, knownQuestions, unknownQuestio
       },
     });
 
-    logger.debug('Gemini API response for revision summary:', response);
+    logger.debug('Gemini API response for revision summary:', JSON.stringify(response, null, 2));
 
-    const jsonStr = cleanJsonString(response.text ?? "");
+    const responseText = response.response.text();
+    const jsonStr = cleanJsonString(responseText ?? "");
     if (!jsonStr) {
       throw new Error('Received empty summary from API');
     }
