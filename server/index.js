@@ -49,21 +49,42 @@ app.get('/api/quota', authMiddleware, async (req, res) => {
   logger.debug(`GET /api/quota: User ID: ${req.userId}`);
   try {
     const { rows } = await pool.query('SELECT questions_used, last_reset_date, has_seen_welcome_modal FROM users WHERE id = $1', [req.userId]);
+    const now = new Date();
+    const twentyFourHoursInMillis = 24 * 60 * 60 * 1000;
+
     if (rows.length > 0) {
-      logger.info(`GET /api/quota: Found user ${req.userId}. Quota: ${rows[0].questions_used}, Welcome Modal Seen: ${rows[0].has_seen_welcome_modal}`);
-      res.json({
-        questionsUsed: rows[0].questions_used,
-        lastResetDate: typeof rows[0].last_reset_date === 'string' ? rows[0].last_reset_date : rows[0].last_reset_date.toISOString().split('T')[0],
-        hasSeenWelcomeModal: rows[0].has_seen_welcome_modal
-      });
+      const user = rows[0];
+      // Ensure last_reset_date is a valid date object before comparison
+      const lastResetDate = user.last_reset_date ? new Date(user.last_reset_date) : new Date(0);
+      const timeDifference = now.getTime() - lastResetDate.getTime();
+
+      // Check if 24 hours have passed since the last reset
+      if (timeDifference >= twentyFourHoursInMillis) {
+        logger.info(`24-hour window has passed. Resetting daily quota for user ${req.userId}.`);
+        const newResetTimestamp = now.toISOString();
+        await pool.query('UPDATE users SET questions_used = 0, last_reset_date = $1 WHERE id = $2', [newResetTimestamp, req.userId]);
+        res.json({
+          questionsUsed: 0,
+          lastResetDate: newResetTimestamp,
+          hasSeenWelcomeModal: user.has_seen_welcome_modal
+        });
+      } else {
+        // Quota is still within the 24-hour window
+        logger.info(`GET /api/quota: Found user ${req.userId}. Quota is still valid.`);
+        res.json({
+          questionsUsed: user.questions_used,
+          lastResetDate: user.last_reset_date,
+          hasSeenWelcomeModal: user.has_seen_welcome_modal
+        });
+      }
     } else {
-      // User not found, create them
-      const today = new Date().toISOString().split('T')[0];
+      // User not found, create them with the current timestamp
+      const newResetTimestamp = now.toISOString();
       logger.info(`GET /api/quota: User ${req.userId} not found, creating new entry.`);
-      await pool.query('INSERT INTO users (id, questions_used, last_reset_date, has_seen_welcome_modal) VALUES ($1, 0, $2, FALSE)', [req.userId, today]);
+      await pool.query('INSERT INTO users (id, questions_used, last_reset_date, has_seen_welcome_modal) VALUES ($1, 0, $2, FALSE)', [req.userId, newResetTimestamp]);
       res.json({
         questionsUsed: 0,
-        lastResetDate: today,
+        lastResetDate: newResetTimestamp,
         hasSeenWelcomeModal: false
       });
     }
