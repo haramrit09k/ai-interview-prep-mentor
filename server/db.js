@@ -91,7 +91,8 @@ db.query(createTableSql)
       // PostgreSQL: Use ALTER TABLE IF NOT EXISTS ADD COLUMN
       return Promise.all([
         db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_seen_welcome_modal BOOLEAN DEFAULT FALSE;`),
-        db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS unanswered_questions TEXT;`)
+        db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS unanswered_questions TEXT;`),
+        db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS revision_summaries TEXT;`)
       ]);
     } else {
       // SQLite: Use PRAGMA table_info check before ALTER TABLE ADD COLUMN
