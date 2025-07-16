@@ -24,6 +24,12 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 // For production, configure CORS to only allow your frontend domain
 app.use(cors()); 
 
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  next();
+});
+
 // Request logging middleware
 app.use((req, res, next) => {
   logger.info(`Incoming Request: ${req.method} ${req.originalUrl}`);
@@ -137,6 +143,7 @@ app.get('/api/questions', authMiddleware, rateLimiter, async (req, res) => {
       logger.info(`GET /api/questions: Found stored questions for user ${req.userId}.`);
     }
 
+    // Stored questions are now a one-time cache. Use them and clear them.
     const questionsForLevel = storedQuestionMap[skillId]?.[level] || [];
     let questionsToReturn = [];
     let remainingCount = requestedCount;
@@ -146,9 +153,15 @@ app.get('/api/questions', authMiddleware, rateLimiter, async (req, res) => {
       questionsToReturn = questionsForLevel.slice(0, numToTake);
       remainingCount -= numToTake;
       
-      // Update the stored map by removing the questions that were taken
-      storedQuestionMap[skillId][level] = questionsForLevel.slice(numToTake);
-      logger.info(`GET /api/questions: Returning ${numToTake} questions from storage for user ${req.userId}.`);
+      // Clear the used questions from storage for that specific skill and level
+      if (storedQuestionMap[skillId] && storedQuestionMap[skillId][level]) {
+        delete storedQuestionMap[skillId][level];
+        // If the skill has no more levels with cached questions, remove the skill entry
+        if (Object.keys(storedQuestionMap[skillId]).length === 0) {
+          delete storedQuestionMap[skillId];
+        }
+      }
+      logger.info(`GET /api/questions: Returning ${numToTake} questions from storage for user ${req.userId} and clearing them.`);
     }
 
     if (remainingCount > 0) {
@@ -227,9 +240,12 @@ app.post('/api/questions/save-unanswered', express.json(), authMiddleware, async
         storedQuestionMap[skillId][level] = [];
       }
 
-      // Avoid duplicates
+      // Avoid duplicates: check if the question text already exists for that skill and level
       if (!storedQuestionMap[skillId][level].some(q => q.text === text)) {
         storedQuestionMap[skillId][level].push(question);
+        logger.debug(`Adding new unanswered question for skill ${skillId}: "${text}"`);
+      } else {
+        logger.debug(`Skipping duplicate unanswered question for skill ${skillId}: "${text}"`);
       }
     });
 
@@ -384,6 +400,62 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   // Return a 200 response to acknowledge receipt of the event
   res.json({ received: true });
 });
+
+// Endpoint to handle saving session data when the user exits the page
+app.post('/api/session/save-on-exit', express.json(), authMiddleware, async (req, res) => {
+    logger.debug(`POST /api/session/save-on-exit: User ID: ${req.userId}`);
+    const { unansweredQuestions, summaryData } = req.body;
+
+    if (!summaryData || !summaryData.skillId) {
+        return res.status(400).send('Missing summary data.');
+    }
+
+    try {
+        // Use a transaction to ensure atomicity
+        await pool.query('BEGIN');
+
+        // 1. Save unanswered questions
+        if (unansweredQuestions && unansweredQuestions.length > 0) {
+            const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
+            let storedQuestionMap = (rows.length > 0 && rows[0].unanswered_questions) ? JSON.parse(rows[0].unanswered_questions) : {};
+
+            unansweredQuestions.forEach(question => {
+                const { skillId, level, text } = question;
+                if (!skillId || !level || !text) return;
+                if (!storedQuestionMap[skillId]) storedQuestionMap[skillId] = {};
+                if (!storedQuestionMap[skillId][level]) storedQuestionMap[skillId][level] = [];
+                if (!storedQuestionMap[skillId][level].some(q => q.text === text)) {
+                    storedQuestionMap[skillId][level].push(question);
+                }
+            });
+            await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
+            logger.info(`Saved ${unansweredQuestions.length} unanswered questions for user ${req.userId} on exit.`);
+        }
+
+        // 2. Generate and save revision summary
+        const { skillId, skillName, history } = summaryData;
+        const knownQuestions = history.filter(h => h.outcome === 'correct' || h.outcome === 'partially_correct').map(h => h.questionText);
+        const unknownQuestions = history.filter(h => h.outcome === 'incorrect' || h.outcome === 'idk').map(h => h.questionText);
+
+        if (knownQuestions.length > 0 || unknownQuestions.length > 0) {
+            const generatedSummary = await generateRevisionSummary(skillName, knownQuestions, unknownQuestions);
+            const { rows: summaryRows } = await pool.query('SELECT revision_summaries FROM users WHERE id = $1', [req.userId]);
+            let summaries = (summaryRows.length > 0 && summaryRows[0].revision_summaries) ? JSON.parse(summaryRows[0].revision_summaries) : {};
+            summaries[skillId] = { ...generatedSummary, lastUpdated: new Date().toISOString() };
+            await pool.query('UPDATE users SET revision_summaries = $1 WHERE id = $2', [JSON.stringify(summaries), req.userId]);
+            logger.info(`Saved revision summary for skill ${skillId} for user ${req.userId} on exit.`);
+        }
+
+        await pool.query('COMMIT');
+        res.status(200).send('Session data saved successfully.');
+
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        logger.error(`Error in /api/session/save-on-exit for user ${req.userId}:`, err.message);
+        res.status(500).send('Server Error');
+    }
+});
+
 
 // --- Serve React App in Production ---
 if (process.env.NODE_ENV === 'production') {

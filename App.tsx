@@ -97,7 +97,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         try {
           const response = await fetch('/api/quota', {
             headers: {
-              'Authorization': `Bearer ${localStorage.getItem('google_id_token')}` // Assuming you store the ID token here
+              'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
             }
           });
           if (response.ok) {
@@ -289,6 +289,49 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         setIsStartingSession(false);
     }
   }, [customQuestions, isAuthenticated, sessionsRemaining, setAnonSessionsUsed]);
+
+  const practiceSessionRef = useRef(practiceSession);
+  useEffect(() => {
+    practiceSessionRef.current = practiceSession;
+  }, [practiceSession]);
+
+  // Effect to handle saving session data on page unload
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      // Check if there's an active practice session that needs saving.
+      if (practiceSessionRef.current && practiceSessionRef.current.consumedQuestionIds.size > 0) {
+        // Most modern browsers do not display this message, but it's required for the event to trigger.
+        event.preventDefault();
+        event.returnValue = 'You have an active session. Are you sure you want to leave?';
+
+        // Use navigator.sendBeacon to reliably send data on unload
+        // Note: This is a fire-and-forget request. We won't get a response.
+        if (isAuthenticated && localStorage.getItem('google_id_token')) {
+            const unansweredQuestions = practiceSessionRef.current.questions.filter(q => !practiceSessionRef.current.consumedQuestionIds.has(q.id));
+            
+            const payload = {
+                unansweredQuestions,
+                // Include summary data directly to avoid relying on a separate async call
+                summaryData: {
+                    skillId: practiceSessionRef.current.skill.id,
+                    skillName: practiceSessionRef.current.skill.name,
+                    // Use the ref for the most up-to-date history
+                    history: answerHistoryRef.current.filter(h => h.skillId === practiceSessionRef.current.skill.id),
+                }
+            };
+            
+            const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+            navigator.sendBeacon('/api/session/save-on-exit', blob);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isAuthenticated, answerHistoryRef]); // Dependencies
 
   const endPracticeSession = useCallback(async () => {
     if (practiceSession && isAuthenticated) {
