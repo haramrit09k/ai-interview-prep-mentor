@@ -12,14 +12,15 @@ interface HeaderProps {
     onLoginSuccess: (credentialResponse: any) => void;
     onLogout: () => void;
     isAuthEnabled: boolean;
-    questionsRemaining: number; // New prop
-    isAuthenticated: boolean; // New prop
-    onPurchaseQuestions: (quantity: number) => void; // New prop
-    onOpenWelcomeModal: () => void; // New prop for opening welcome modal
-    setShowPurchaseModal: (show: boolean) => void; // New prop to control purchase modal visibility
+    questionsRemaining: number;
+    isAuthenticated: boolean;
+    onPurchaseQuestions: (quantity: number, priceCents: number) => void;
+    onOpenWelcomeModal: () => void;
+    setShowPurchaseModal: (show: boolean) => void;
+    nextResetDate: string | null; // New prop for next reset date
 }
 
-const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onPurchaseQuestions, onOpenWelcomeModal, setShowPurchaseModal }) => {
+const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onPurchaseQuestions, onOpenWelcomeModal, setShowPurchaseModal, nextResetDate }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [showPurchaseOptions, setShowPurchaseOptions] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -97,33 +98,12 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                                 <QuestionMarkCircleIcon className="w-6 h-6" />
                             </button>
                             {isAuthenticated && (
-                                <div className="relative group">
-                                    <button
-                                        onClick={handleTogglePurchaseOptions}
-                                        className="px-4 py-2 bg-brand-primary text-white font-semibold rounded-lg hover:bg-brand-light transition-colors"
-                                    >
-                                        Buy Questions
-                                    </button>
-                                    {showPurchaseOptions && (
-                                      <div className="absolute right-0 mt-2 w-64 bg-background-light border border-gray-600 rounded-lg shadow-lg z-20">
-                                        {purchaseOptions.map((option) => (
-                                            <button
-                                                key={option.quantity}
-                                                onClick={() => handlePurchase(option.quantity)}
-                                                className="flex flex-col items-center justify-center p-3 border-b last:border-b-0 hover:bg-gray-700 transition-colors w-full"
-                                            >
-                                                <span className="font-semibold">{option.quantity} Questions</span>
-                                                <span className="text-sm">${(option.priceCents / 100).toFixed(2)}</span>
-                                                {option.savingsText && (
-                                                  <span className="mt-1 inline-block bg-green-500 text-white text-xs rounded-full px-2 py-0.5">
-                                                    {option.savingsText}
-                                                  </span>
-                                                )}
-                                            </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                </div>
+                                <button
+                                    onClick={() => setShowPurchaseModal(true)}
+                                    className="px-4 py-2 bg-brand-primary text-white font-semibold rounded-lg hover:bg-brand-light transition-colors"
+                                >
+                                    Buy Questions
+                                </button>
                             )}
                             {isAuthEnabled ? (
                                 userProfile ? (
@@ -131,11 +111,19 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                                         <span className="text-text-secondary text-sm">
                                             Welcome, {userProfile.name.split(' ')[0]}!
                                         </span>
-                                        <img
-                                            src={userProfile.picture}
-                                            alt="User profile"
-                                            className="w-9 h-9 rounded-full border-2 border-brand-light"
-                                        />
+                                        <div className="relative group">
+                                            <img
+                                                src={userProfile.picture}
+                                                alt="User profile"
+                                                className="w-9 h-9 rounded-full border-2 border-brand-light cursor-pointer"
+                                            />
+                                            <div className="absolute left-1/2 -translate-x-1/2 mt-2 w-48 bg-background-light border border-gray-600 rounded-lg shadow-lg z-20 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 p-3 text-center text-sm">
+                                                <p className="text-text-primary">{questionsRemaining} questions left</p>
+                                                {nextResetDate && (
+                                                    <p className="text-text-secondary">Next reset: {nextResetDate}</p>
+                                                )}
+                                            </div>
+                                        </div>
                                         <button
                                             onClick={onLogout}
                                             className="flex items-center gap-1 sm:gap-2 py-2 px-2 sm:px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors text-sm sm:text-base"
@@ -163,6 +151,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                         </div>
                     </div>
                 </div>
+
                 {/* Mobile menu */}
                 {isMobileMenuOpen && (
                     <div ref={menuRef} className="md:hidden absolute top-16 right-0 w-full bg-background-medium/95 backdrop-blur-sm pb-4 z-30">
@@ -198,6 +187,11 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                                     <span className="text-text-secondary text-sm">
                                         You have {questionsRemaining} questions left.
                                     </span>
+                                    {nextResetDate && (
+                                        <span className="text-text-secondary text-xs">
+                                            Next reset: {nextResetDate}
+                                        </span>
+                                    )}
                                 </div>
                             )}
                             {isAuthenticated && (

@@ -46,24 +46,33 @@ const getDurationInMilliseconds = (start) => {
   return (diff[0] * NS_PER_SEC + diff[1]) / NS_TO_MS;
 };
 
+// Helper function to get the start of the current week (Monday)
+const getStartOfWeek = (date) => {
+  const d = new Date(date);
+  const day = d.getDay(); // Sunday - 0, Monday - 1, ..., Saturday - 6
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Monday start
+  d.setDate(diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
 // --- API Routes ---
 app.get('/api/quota', authMiddleware, async (req, res) => {
   logger.debug(`GET /api/quota: User ID: ${req.userId}`);
   try {
     const { rows } = await pool.query('SELECT questions_used, last_reset_date, has_seen_welcome_modal FROM users WHERE id = $1', [req.userId]);
     const now = new Date();
-    const twentyFourHoursInMillis = 24 * 60 * 60 * 1000;
+    const startOfCurrentWeek = getStartOfWeek(now);
 
     if (rows.length > 0) {
       const user = rows[0];
-      // Ensure last_reset_date is a valid date object before comparison
       const lastResetDate = user.last_reset_date ? new Date(user.last_reset_date) : new Date(0);
-      const timeDifference = now.getTime() - lastResetDate.getTime();
+      const startOfLastResetWeek = getStartOfWeek(lastResetDate);
 
-      // Check if 24 hours have passed since the last reset
-      if (timeDifference >= twentyFourHoursInMillis) {
-        logger.info(`24-hour window has passed. Resetting daily quota for user ${req.userId}.`);
-        const newResetTimestamp = now.toISOString();
+      // Check if the last reset was in a previous week
+      if (startOfCurrentWeek.getTime() > startOfLastResetWeek.getTime()) {
+        logger.info(`New week detected. Resetting weekly quota for user ${req.userId}.`);
+        const newResetTimestamp = startOfCurrentWeek.toISOString();
         await pool.query('UPDATE users SET questions_used = 0, last_reset_date = $1 WHERE id = $2', [newResetTimestamp, req.userId]);
         res.json({
           questionsUsed: 0,
@@ -71,8 +80,8 @@ app.get('/api/quota', authMiddleware, async (req, res) => {
           hasSeenWelcomeModal: user.has_seen_welcome_modal
         });
       } else {
-        // Quota is still within the 24-hour window
-        logger.info(`GET /api/quota: Found user ${req.userId}. Quota is still valid.`);
+        // Quota is still within the current week
+        logger.info(`GET /api/quota: Found user ${req.userId}. Quota is still valid for the current week.`);
         res.json({
           questionsUsed: user.questions_used,
           lastResetDate: user.last_reset_date,
@@ -80,9 +89,9 @@ app.get('/api/quota', authMiddleware, async (req, res) => {
         });
       }
     } else {
-      // User not found, create them with the current timestamp
-      const newResetTimestamp = now.toISOString();
-      logger.info(`GET /api/quota: User ${req.userId} not found, creating new entry.`);
+      // User not found, create them with the start of the current week as reset date
+      const newResetTimestamp = startOfCurrentWeek.toISOString();
+      logger.info(`GET /api/quota: User ${req.userId} not found, creating new entry with weekly reset.`);
       await pool.query('INSERT INTO users (id, questions_used, last_reset_date, has_seen_welcome_modal) VALUES ($1, 0, $2, FALSE)', [req.userId, newResetTimestamp]);
       res.json({
         questionsUsed: 0,
@@ -321,16 +330,9 @@ app.get('/api/revision-summary/:skillId', authMiddleware, async (req, res) => {
 // New endpoint to create a Stripe Checkout Session
 app.post('/api/create-checkout-session', express.json(), authMiddleware, async (req, res) => {
   logger.debug(`POST /api/create-checkout-session: User ID: ${req.userId}`);
-  const { quantity } = req.body; // Assuming frontend sends the quantity of questions to buy
+  const { quantity, priceCents } = req.body; // Assuming frontend sends the quantity of questions to buy and price in cents
 
-  // Define pricing tiers (in cents)
-  const pricingTiers = {
-    10: 20,   // 10 questions for $0.20
-    50: 80,   // 50 questions for $0.80
-    100: 150, // 100 questions for $1.50
-  };
-
-  const unit_amount = pricingTiers[quantity];
+  const unit_amount = priceCents;
 
   if (unit_amount === undefined) {
     return res.status(400).json({ error: 'Invalid quantity selected.' });
