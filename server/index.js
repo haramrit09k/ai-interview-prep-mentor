@@ -330,16 +330,9 @@ app.get('/api/revision-summary/:skillId', authMiddleware, async (req, res) => {
 // New endpoint to create a Stripe Checkout Session
 app.post('/api/create-checkout-session', express.json(), authMiddleware, async (req, res) => {
   logger.debug(`POST /api/create-checkout-session: User ID: ${req.userId}`);
-  const { quantity } = req.body; // Assuming frontend sends the quantity of questions to buy
+  const { quantity, priceCents } = req.body; // Assuming frontend sends the quantity of questions to buy and price in cents
 
-  // Define pricing tiers (in cents)
-  const pricingTiers = {
-    10: 20,   // 10 questions for $0.20
-    50: 80,   // 50 questions for $0.80
-    100: 150, // 100 questions for $1.50
-  };
-
-  const unit_amount = pricingTiers[quantity];
+  const unit_amount = priceCents;
 
   if (unit_amount === undefined) {
     return res.status(400).json({ error: 'Invalid quantity selected.' });
