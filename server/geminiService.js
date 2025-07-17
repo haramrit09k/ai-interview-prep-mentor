@@ -74,7 +74,7 @@ ${levelSpecificInstructions}
       contents: contents,
       config: {
         responseMimeType: "application/json",
-        maxOutputTokens: 1500,
+        maxOutputTokens: 3000,
         safetySettings: [
           { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
           { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },

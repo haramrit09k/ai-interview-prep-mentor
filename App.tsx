@@ -228,11 +228,14 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     setPracticeOptions({ isOpen: false, skill: null });
 
     try {
+        const headers: HeadersInit = {};
+        if (isAuthenticated) {
+            headers['Authorization'] = `Bearer ${localStorage.getItem('google_id_token')}`;
+        }
+
         logger.info(`Fetching questions for skill: ${skill.name}, level: ${level}, count: ${count}`);
         const response = await fetch(`/api/questions?skillName=${encodeURIComponent(skill.name)}&level=${encodeURIComponent(level)}&count=${count}&skillId=${skill.id}`, {
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
-            }
+            headers,
         });
 
         // Get response text first
