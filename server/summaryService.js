@@ -91,11 +91,11 @@ const generateRevisionSummary = async (skillName, knownQuestions, unknownQuestio
 
     logger.debug('Gemini API response for revision summary:', JSON.stringify(response, null, 2));
 
-    if (!response || !response.response) {
+    if (!response || !response.response || !response.response.candidates || !response.response.candidates[0].content || !response.response.candidates[0].content.parts || !response.response.candidates[0].content.parts[0].text) {
       throw new Error('Invalid or empty response from Gemini API');
     }
 
-    const responseText = response.response.text();
+    const responseText = response.response.candidates[0].content.parts[0].text;
     const jsonStr = cleanJsonString(responseText ?? "");
     if (!jsonStr) {
       throw new Error('Received empty summary from API');
@@ -104,7 +104,7 @@ const generateRevisionSummary = async (skillName, knownQuestions, unknownQuestio
 
     return {
       conceptsKnown: result.conceptsKnown.map(c => `- ${c.trim()}`).join('\n'),
-      conceptsToReview: result.conceptsToReview.map(c => `- ${c.trim()}`).join('\n'),
+      conceptsToReview: result.conceptsToReview.map(c => `- ${c.trim()}`).join('\n')
     };
   } catch (error) {
     logger.error('Error generating revision summary:', error);
