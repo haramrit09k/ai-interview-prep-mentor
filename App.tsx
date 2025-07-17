@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GoogleLogin, GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import logger from './src/logger'; // Import the logger
+import Footer from './components/Footer';
 
 
 // Helper to shuffle array
@@ -522,7 +523,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   }
 
   return (
-    <div className="min-h-screen text-text-primary bg-background-dark">
+    <div className="flex flex-col min-h-screen text-text-primary bg-background-dark">
       <Header 
         userProfile={userProfile} 
         onLoginSuccess={handleLoginSuccess} 
@@ -627,6 +628,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           onPurchase={handlePurchaseQuestions}
         />
       )}
+      <Footer />
     </div>
   );
 };

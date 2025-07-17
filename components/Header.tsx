@@ -52,7 +52,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
     };
 
     const handlePurchase = (quantity: number) => {
-        onPurchaseQuestions(quantity);
+        onPurchaseQuestions(quantity, purchaseOptions[quantity].priceCents);
         setShowPurchaseOptions(false);
     };
 
