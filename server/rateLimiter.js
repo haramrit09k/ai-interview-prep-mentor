@@ -6,9 +6,12 @@ const WINDOW_SIZE_IN_HOURS = 1;
 const MAX_WINDOW_REQUEST_COUNT = 100;
 const WINDOW_LOG_INTERVAL_IN_SECONDS = 3600; // 1 hour
 
+const getIdentifier = (req) => req.userId || req.ip;
+
 const rateLimiter = async (req, res, next) => {
   try {
-    const record = await redisClient.get(req.userId);
+    const identifier = getIdentifier(req);
+    const record = await redisClient.get(identifier);
     const currentRequestTime = new Date();
 
     // If no record exists for this user, create one and allow the request
@@ -19,7 +22,7 @@ const rateLimiter = async (req, res, next) => {
         requestCount: 1,
       };
       newRecord.push(requestLog);
-      await redisClient.set(req.userId, JSON.stringify(newRecord));
+      await redisClient.set(identifier, JSON.stringify(newRecord));
       return next();
     }
 
@@ -55,7 +58,7 @@ const rateLimiter = async (req, res, next) => {
           requestCount: 1,
         });
       }
-      await redisClient.set(req.userId, JSON.stringify(requestsWithinWindow));
+      await redisClient.set(identifier, JSON.stringify(requestsWithinWindow));
       return next();
     }
   } catch (error) {

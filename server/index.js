@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const pool = require('./db');
 const { authMiddleware } = require('./auth');
+const { authOptionalMiddleware } = require('./authOptional');
 const { generateQuestionsForSkill, evaluateAnswer } = require('./geminiService');
 const { generateRevisionSummary } = require('./summaryService');
 const Stripe = require('stripe');
@@ -119,7 +120,7 @@ app.post('/api/user/seen-welcome-modal', express.json(), authMiddleware, async (
   }
 });
 
-app.get('/api/questions', authMiddleware, rateLimiter, async (req, res) => {
+app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) => {
   logger.debug(`GET /api/questions: User ID: ${req.userId}`);
   const { skillName, level, count, skillId } = req.query; // skillId is now expected
   const requestedCount = parseInt(count, 10);
@@ -129,54 +130,64 @@ app.get('/api/questions', authMiddleware, rateLimiter, async (req, res) => {
     return res.status(400).send('Missing or invalid parameters: skillName, level, count, skillId');
   }
 
-  try {
-    const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
-    let storedQuestionMap = {};
-    if (rows.length > 0 && rows[0].unanswered_questions) {
-      storedQuestionMap = JSON.parse(rows[0].unanswered_questions);
-      logger.info(`GET /api/questions: Found stored questions for user ${req.userId}.`);
-    }
-
-    // Stored questions are now a one-time cache. Use them and clear them.
-    const questionsForLevel = storedQuestionMap[skillId]?.[level] || [];
-    let questionsToReturn = [];
-    let remainingCount = requestedCount;
-
-    if (questionsForLevel.length > 0) {
-      const numToTake = Math.min(requestedCount, questionsForLevel.length);
-      questionsToReturn = questionsForLevel.slice(0, numToTake);
-      remainingCount -= numToTake;
-      
-      // Clear the used questions from storage for that specific skill and level
-      if (storedQuestionMap[skillId] && storedQuestionMap[skillId][level]) {
-        delete storedQuestionMap[skillId][level];
-        // If the skill has no more levels with cached questions, remove the skill entry
-        if (Object.keys(storedQuestionMap[skillId]).length === 0) {
-          delete storedQuestionMap[skillId];
-        }
+  if (req.userId) {
+    // Authenticated user logic
+    try {
+      const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
+      let storedQuestionMap = {};
+      if (rows.length > 0 && rows[0].unanswered_questions) {
+        storedQuestionMap = JSON.parse(rows[0].unanswered_questions);
+        logger.info(`GET /api/questions: Found stored questions for user ${req.userId}.`);
       }
-      logger.info(`GET /api/questions: Returning ${numToTake} questions from storage for user ${req.userId} and clearing them.`);
+
+      const questionsForLevel = storedQuestionMap[skillId]?.[level] || [];
+      let questionsToReturn = [];
+      let remainingCount = requestedCount;
+
+      if (questionsForLevel.length > 0) {
+        const numToTake = Math.min(requestedCount, questionsForLevel.length);
+        questionsToReturn = questionsForLevel.slice(0, numToTake);
+        remainingCount -= numToTake;
+        
+        if (storedQuestionMap[skillId] && storedQuestionMap[skillId][level]) {
+          delete storedQuestionMap[skillId][level];
+          if (Object.keys(storedQuestionMap[skillId]).length === 0) {
+            delete storedQuestionMap[skillId];
+          }
+        }
+        logger.info(`GET /api/questions: Returning ${numToTake} questions from storage for user ${req.userId} and clearing them.`);
+      }
+
+      if (remainingCount > 0) {
+        logger.info(`GET /api/questions: Generating ${remainingCount} new questions for user ${req.userId}.`);
+        const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount, skillId);
+        questionsToReturn = [...questionsToReturn, ...newQuestions];
+      }
+
+      await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
+      logger.info(`GET /api/questions: Updated unanswered questions in DB for user ${req.userId}.`);
+
+      res.json({ questions: questionsToReturn });
+
+    } catch (err) {
+      logger.error(`GET /api/questions: Error for user ${req.userId}:`, err.message);
+      res.status(500).send('Server Error');
     }
-
-    if (remainingCount > 0) {
-      logger.info(`GET /api/questions: Generating ${remainingCount} new questions for user ${req.userId}.`);
-      const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount, skillId);
-      questionsToReturn = [...questionsToReturn, ...newQuestions];
+  } else {
+    // Guest user logic
+    try {
+      logger.info(`GET /api/questions: Generating ${requestedCount} new questions for guest user.`);
+      const newQuestions = await generateQuestionsForSkill(skillName, level, requestedCount, skillId);
+      res.json({ questions: newQuestions });
+    } catch (err) {
+      logger.error(`GET /api/questions: Error for guest user:`, err.message);
+      res.status(500).send('Server Error');
     }
-
-    await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
-    logger.info(`GET /api/questions: Updated unanswered questions in DB for user ${req.userId}.`);
-
-    res.json({ questions: questionsToReturn });
-
-  } catch (err) {
-    logger.error(`GET /api/questions: Error for user ${req.userId}:`, err.message);
-    res.status(500).send('Server Error');
   }
 });
 
 
-app.post('/api/evaluate', express.json(), authMiddleware, rateLimiter, async (req, res) => {
+app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, async (req, res) => {
   const { questionText, userAnswer } = req.body;
 
   if (!questionText || userAnswer === undefined) {
