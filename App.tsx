@@ -606,7 +606,10 @@ const App: React.FC = () => {
 
     if (isAuthEnabled) {
       return (
-          <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+          <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}
+            onScriptLoadSuccess={() => console.log('GSI script loaded successfully')}
+            onScriptLoadError={() => console.error('GSI script failed to load')}
+          >
               <AppContent isAuthEnabled={true} />
           </GoogleOAuthProvider>
       );

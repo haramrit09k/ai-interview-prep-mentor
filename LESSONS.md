@@ -78,3 +78,44 @@ By thinking about indexing *during the design phase*, we are building a system t
 - `Query Performance`
 - `Full Table Scan`
 - `Scalability`
+
+
+Great, I've reviewed the codebase and the commit history. Based on this, I've
+  identified several key architectural decisions and patterns that would be
+  excellent topics for the LESSONS.md file.
+
+  Here is a list of potential lessons we could document:
+
+   1. Monorepo vs. Separate Repositories: Discuss the choice of a single repository
+      for both the frontend (React) and backend (Node.js) code, and the pros and
+      cons of this approach.
+   2. State Management Strategy (Client-side): Explain the decision to use a
+      combination of useState and useLocalStorage for managing state, and how this
+      balances simplicity with persistence.
+   3. Database Abstraction: Detail the creation of the server/db.js module, which
+      cleverly abstracts away the differences between SQLite (for development) and
+      PostgreSQL (for production), allowing the same application code to run in both
+      environments.
+   4. API Design & Backend-for-Frontend (BFF): Analyze how the Node.js server acts
+      as a "Backend-for-Frontend," handling authentication, business logic, and
+      communication with external services (like the Gemini API and Stripe) to
+      simplify the React client.
+   5. Production Hardening & Environment-Specific Configuration: Cover the
+      challenges and solutions related to deploying to Heroku, including handling
+      environment variables (.env.local), connecting to add-ons (Redis), and
+      managing different database configurations. This would build on the notes we
+      already started.
+   6. Error Handling & Logging (Full-Stack): Describe the implementation of a
+      unified logging strategy with Winston on the backend and a custom logger on
+      the frontend that can send logs back to the server, creating a holistic view
+      of application health.
+   7. Authentication Flow (Google OAuth & JWT): Document the end-to-end
+      authentication process, from the React client handling the Google login to the
+      Node.js server validating the JWT and using it to identify the user in
+      subsequent API calls.
+   8. Asynchronous Operations & Caching Strategy: Explain the use of Redis for
+      caching expensive API calls (like Gemini and evaluations) and the
+      implementation of a rate limiter to prevent abuse and manage costs.
+
+  Which of these topics would you like me to focus on for the next entry in
+  LESSONS.md?
