@@ -24,7 +24,7 @@ async function authMiddleware(req, res, next) {
     });
     const payload = ticket.getPayload();
     req.userId = payload['sub']; // 'sub' is the user's unique Google ID
-    logger.info(`authMiddleware: Token verified. User ID: ${req.userId}`);
+    logger.debug(`authMiddleware: Token verified. User ID: ${req.userId}`);
     next();
   } catch (error) {
     logger.error('authMiddleware: Error verifying token', error);

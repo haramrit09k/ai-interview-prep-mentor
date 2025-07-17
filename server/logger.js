@@ -7,7 +7,7 @@ const logFormat = printf(({ level, message, timestamp, stack, ...meta }) => {
 });
 
 const logger = createLogger({
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+  level: process.env.NODE_ENV === 'production' ? 'info' : process.env.VITE_APP_LOG_LEVEL || 'debug',
   format: combine(
     timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     splat(), // Important for formatting metadata

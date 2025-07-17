@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import useLocalStorage from './hooks/useLocalStorage';
 import type { Skill, Question, AnswerOutcome, ExperienceLevel, AnswerHistory, UserProfile } from './types';
 
@@ -307,19 +307,19 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         // Use navigator.sendBeacon to reliably send data on unload
         // Note: This is a fire-and-forget request. We won't get a response.
         if (isAuthenticated && localStorage.getItem('google_id_token')) {
-            const unansweredQuestions = practiceSessionRef.current.questions.filter(q => !practiceSessionRef.current.consumedQuestionIds.has(q.id));
-            
+            const unansweredQuestions = practiceSessionRef.current.questions.filter(q => !practiceSessionRef.current?.consumedQuestionIds.has(q.id));
+
             const payload = {
                 unansweredQuestions,
                 // Include summary data directly to avoid relying on a separate async call
                 summaryData: {
-                    skillId: practiceSessionRef.current.skill.id,
-                    skillName: practiceSessionRef.current.skill.name,
+                    skillId: practiceSessionRef.current?.skill.id,
+                    skillName: practiceSessionRef.current?.skill.name,
                     // Use the ref for the most up-to-date history
-                    history: answerHistoryRef.current.filter(h => h.skillId === practiceSessionRef.current.skill.id),
+                    history: answerHistoryRef.current.filter(h => h.skillId === practiceSessionRef.current?.skill.id),
                 }
-            };
-            
+            }
+
             const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
             navigator.sendBeacon('/api/session/save-on-exit', blob);
         }

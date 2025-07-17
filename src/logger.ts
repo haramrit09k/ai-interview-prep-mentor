@@ -1,7 +1,7 @@
 // src/logger.ts
 
-const LOG_LEVEL = import.meta.env.VITE_APP_LOG_LEVEL || 'info'; // Default to 'info'
-const BACKEND_LOGGING_ENABLED = import.meta.env.VITE_APP_BACKEND_LOGGING_ENABLED === 'true';
+const LOG_LEVEL = (import.meta as any).env.VITE_APP_LOG_LEVEL || 'info'; // Default to 'info'
+const BACKEND_LOGGING_ENABLED = (import.meta as any).env.VITE_APP_BACKEND_LOGGING_ENABLED === 'true';
 const BACKEND_LOG_ENDPOINT = '/api/log'; // Your backend logging endpoint
 
 const LOG_LEVELS = {
@@ -12,7 +12,7 @@ const LOG_LEVELS = {
   silent: 4,
 };
 
-const currentLogLevel = LOG_LEVELS[LOG_LEVEL.toLowerCase()] || LOG_LEVELS.info;
+const currentLogLevel = LOG_LEVELS[LOG_LEVEL.toLowerCase() as keyof typeof LOG_LEVELS] || LOG_LEVELS.info;
 
 const sendLogToBackend = (level: keyof typeof LOG_LEVELS, message: string, context?: any) => {
   if (!BACKEND_LOGGING_ENABLED) {
