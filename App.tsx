@@ -14,7 +14,7 @@ import { SpinnerIcon } from './components/Icons';
 import ToastNotification from './components/ToastNotification';
 import PurchaseQuestionsModal from './components/PurchaseQuestionsModal';
 import { v4 as uuidv4 } from 'uuid';
-import { GoogleOAuthProvider } from '@react-oauth/google';
+import { GoogleLogin, GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import logger from './src/logger'; // Import the logger
 
@@ -35,7 +35,7 @@ const RATING_CHANGE: Record<AnswerOutcome, number> = {
 const SESSIONS_LIMIT_ANON = 2;
 const SKILLS_LIMIT_ANON = 2;
 const SKILLS_LIMIT_AUTH = 5;
-const QUESTIONS_LIMIT_AUTH = 20;
+const QUESTIONS_LIMIT_AUTH = 50;
 
 // --- STABLE EMPTY ARRAY REFERENCES TO PREVENT RE-RENDERS ---
 const EMPTY_SKILLS: Skill[] = [];
@@ -130,6 +130,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   
   // --- DERIVED STATE FOR UI ---
   const questionsRemaining = isAuthenticated ? QUESTIONS_LIMIT_AUTH - authQuota.questionsUsed : 0;
+  const nextResetDate = isAuthenticated ? new Date(new Date(authQuota.lastResetDate).getTime() + 24 * 60 * 60 * 1000).toLocaleDateString() : null;
   const sessionsRemaining = isAuthenticated ? Infinity : SESSIONS_LIMIT_ANON - anonSessionsUsed;
   const isSkillLimitReached = isAuthenticated 
     ? skills.length >= SKILLS_LIMIT_AUTH
@@ -150,6 +151,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
 
   const handleLoginSuccess = useCallback((credentialResponse: any) => {
     try {
+        console.log('credentialResponse:', credentialResponse);
         const decoded: { sub: string, name: string, email: string, picture: string } = jwtDecode(credentialResponse.credential);
         const profile: UserProfile = {
             id: decoded.sub,
@@ -161,11 +163,22 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         // Store the ID token for backend calls
         localStorage.setItem('google_id_token', credentialResponse.credential);
         setToastMessage('Successfully logged in!');
+
+        // Close all modals on successful login
+        setLimitModal({ isOpen: false, reason: null });
+        setPracticeOptions({ isOpen: false, skill: null });
+        setIsCustomQuestionModalOpen(false);
+        setRevisionModal({ isOpen: false, skill: null });
+        setIsWelcomeModalOpen(false);
+        setShowPurchaseModal(false);
+
     } catch (error) {
         console.error("Error decoding JWT:", error);
         alert("Failed to process login information.");
     }
-  }, [setUserProfile]);
+  }, [setUserProfile, setLimitModal, setPracticeOptions, setIsCustomQuestionModalOpen, setRevisionModal, setIsWelcomeModalOpen, setShowPurchaseModal]);
+
+  
 
   const handleLogout = useCallback(() => {
     if (isAuthEnabled) {
@@ -472,12 +485,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
 
   }, [isAuthenticated, practiceSession, setAuthQuota, setPracticeSession, setSkills, setAnswerHistory]);
 
-  const handlePurchaseQuestions = useCallback(async (quantity: number) => {
+  const handlePurchaseQuestions = useCallback(async (quantity: number, priceCents: number) => {
     if (!isAuthenticated) {
       alert("Please log in to purchase more questions.");
       return;
     }
-    console.log(`Attempting to purchase ${quantity} questions from header...`);
+    console.log(`Attempting to purchase ${quantity} questions for ${priceCents} cents...`);
     try {
       const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
@@ -485,7 +498,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
         },
-        body: JSON.stringify({ quantity }),
+        body: JSON.stringify({ quantity, priceCents }),
       });
 
       if (response.ok) {
@@ -517,6 +530,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         isAuthEnabled={isAuthEnabled}
         questionsRemaining={questionsRemaining}
         isAuthenticated={isAuthenticated}
+        nextResetDate={nextResetDate}
         onPurchaseQuestions={handlePurchaseQuestions}
         onOpenWelcomeModal={() => setIsWelcomeModalOpen(true)}
         setShowPurchaseModal={setShowPurchaseModal}
@@ -569,6 +583,19 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           reason={limitModal.reason}
           onClose={() => setLimitModal({ isOpen: false, reason: null })}
           onUpgrade={handlePurchaseQuestions}
+          // Render GoogleLogin component directly within the modal for convenience
+          googleLoginComponent={(
+            <GoogleLogin
+              onSuccess={handleLoginSuccess}
+              onError={() => {
+                logger.error('Google Login Failed from LimitReachedModal.');
+                alert('Google login failed. Please try again.');
+              }}
+              theme="filled_black"
+              text="signin_with"
+              shape="pill"
+            />
+          )}
         />
       )}
       {(isWelcomeModalOpen || (!isAuthenticated && !hasSeenWelcomeModal) || (isAuthenticated && hasSeenWelcomeModalAuth === false)) && (

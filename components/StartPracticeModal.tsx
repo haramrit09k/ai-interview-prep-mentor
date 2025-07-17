@@ -79,7 +79,7 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
                 </label>
                 {isAuthenticated ? (
                   <span className="text-xs text-brand-light font-medium">
-                    {questionsRemaining} Questions Remaining Today
+                    {questionsRemaining} Questions Remaining This Week
                   </span>
                 ) : (
                    <span className="text-xs text-yellow-400 font-medium">

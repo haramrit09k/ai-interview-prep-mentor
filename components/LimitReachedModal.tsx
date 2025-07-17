@@ -4,20 +4,21 @@ import { purchaseOptions } from '../config/purchaseOptions';
 
 interface LimitReachedModalProps {
   onClose: () => void;
-  onUpgrade: (quantity: number) => void; // Now accepts quantity
+  onUpgrade: (quantity: number, priceCents: number) => void; // Now accepts quantity and priceCents
+  googleLoginComponent: React.ReactNode; // New prop for rendering GoogleLogin component
   reason: 'skills' | 'sessions' | 'quota';
 }
 
-export const LimitReachedModal: React.FC<LimitReachedModalProps> = ({ onClose, onUpgrade, reason }) => {
+export const LimitReachedModal: React.FC<LimitReachedModalProps> = ({ onClose, onUpgrade, googleLoginComponent, reason }) => {
   const messages = {
     skills: {
       title: 'Skill Limit Reached!',
-      body: 'To keep this service available for everyone, anonymous users are limited to <strong>2 skills</strong>.',
+      body: 'As an anonymous user, you are limited to <strong>2 skills</strong>. Log in to add more skills and continue your practice journey!',
       upgrade: false,
     },
     sessions: {
       title: 'Practice Limit Reached!',
-      body: 'To keep this service available for everyone, anonymous users are limited to <strong>2 practice sessions</strong>.',
+      body: 'As an anonymous user, you are limited to <strong>2 practice sessions</strong>. Log in to continue practicing and unlock unlimited sessions!',
       upgrade: false,
     },
     quota: {
@@ -72,22 +73,13 @@ export const LimitReachedModal: React.FC<LimitReachedModalProps> = ({ onClose, o
                 </div>
               </div>
             )}
-            {!currentMessage.upgrade && (
-              <>
-                <p>
-                  For unlimited access, you can run this application on your own computer. It's free and open-source!
-                </p>
-                <p>
-                  Just clone the repository from GitHub, add your own Google Gemini API key, and you'll have your own personal, unrestricted interview mentor.
-                </p>
-              </>
-            )}
+            
           </div>
           <div className="mt-6 flex flex-col sm:flex-row gap-3">
             {currentMessage.upgrade ? (
               <>
                 <button
-                  onClick={() => onUpgrade(selectedOption.quantity)}
+                  onClick={() => onUpgrade(selectedOption.quantity, selectedOption.priceCents)}
                   className="flex-1 text-center py-2.5 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-sm"
                 >
                   Buy {selectedOption.quantity} Questions (${(selectedOption.priceCents / 100).toFixed(2)}) & Continue
@@ -102,14 +94,9 @@ export const LimitReachedModal: React.FC<LimitReachedModalProps> = ({ onClose, o
               </>
             ) : (
               <>
-                <a
-                  href="https://github.com/your-username/your-repo-name" // Replace with your actual repo URL
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 text-center py-2.5 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-sm"
-                >
-                  Go to GitHub
-                </a>
+                <div className="flex justify-center w-full">
+                  {googleLoginComponent}
+                </div>
                 <button
                   type="button"
                   onClick={onClose}
