@@ -1,4 +1,13 @@
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold, type GenerateContentResponse, type EvaluationResponse } from "@google/genai";
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold, type GenerateContentResponse, Type } from "@google/genai";
+
+// Define EvaluationResponse type locally
+export type EvaluationResponse = {
+  mentorAnswer: string;
+  feedback: string;
+  classification: 'correct' | 'partially-correct' | 'incorrect';
+  conceptsKnown: string[];
+  conceptsToReview: string[];
+};
 import logger from '../src/logger'; // Import the logger
 
 const API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -116,11 +125,22 @@ const generateRevisionSummary = async (skillName: string, knownQuestions: string
 
     logger.debug('Gemini API response for revision summary:', response);
 
-    const jsonStr = cleanJsonString(response.text ?? "");
-    if (!jsonStr) {
-      throw new Error('Received empty summary from API');
+    // Helper function to clean and extract valid JSON from a string
+    function cleanJsonString(str: string): string {
+      // Try to find the first and last curly braces to extract JSON
+      const firstBrace = str.indexOf('{');
+      const lastBrace = str.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        return str.substring(firstBrace, lastBrace + 1);
+      }
+      return str;
     }
-    const result = JSON.parse(jsonStr);
+    
+        const jsonStr = cleanJsonString(response.text ?? "");
+        if (!jsonStr) {
+          throw new Error('Received empty summary from API');
+        }
+        const result = JSON.parse(jsonStr);
 
     // Post-process to ensure bullet points are on new lines
     const formatConcepts = (concepts: string) => {

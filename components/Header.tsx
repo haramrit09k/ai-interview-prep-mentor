@@ -21,6 +21,7 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onPurchaseQuestions, onOpenWelcomeModal, setShowPurchaseModal }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [showPurchaseOptions, setShowPurchaseOptions] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -45,7 +46,14 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
 
     const showQuotaWarning = isAuthenticated && questionsRemaining <= 10;
 
-    
+    const handleTogglePurchaseOptions = () => {
+        setShowPurchaseOptions(!showPurchaseOptions);
+    };
+
+    const handlePurchase = (quantity: number) => {
+        onPurchaseQuestions(quantity);
+        setShowPurchaseOptions(false);
+    };
 
     const [selectedQuantity, setSelectedQuantity] = useState(purchaseOptions[0].quantity);
 
@@ -91,31 +99,30 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                             {isAuthenticated && (
                                 <div className="relative group">
                                     <button
-                                        className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-sm"
+                                        onClick={handleTogglePurchaseOptions}
+                                        className="px-4 py-2 bg-brand-primary text-white font-semibold rounded-lg hover:bg-brand-light transition-colors"
                                     >
-                                        Buy More Questions
+                                        Buy Questions
                                     </button>
-                                    <div className="absolute right-0 mt-2 w-48 bg-background-medium rounded-md shadow-lg py-1 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 transform origin-top-right">
-                                        {purchaseOptions.map(option => (
+                                    {showPurchaseOptions && (
+                                      <div className="absolute right-0 mt-2 w-64 bg-background-light border border-gray-600 rounded-lg shadow-lg z-20">
+                                        {purchaseOptions.map((option) => (
                                             <button
                                                 key={option.quantity}
-                                                onClick={() => {
-                                                    setSelectedQuantity(option.quantity);
-                                                    onPurchaseQuestions(option.quantity);
-                                                }}
-                                                className={`block w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-background-light relative flex justify-between items-center
-                                                  ${option.highlight ? 'bg-yellow-400/10' : ''}
-                                                `}
+                                                onClick={() => handlePurchase(option.quantity)}
+                                                className="flex flex-col items-center justify-center p-3 border-b last:border-b-0 hover:bg-gray-700 transition-colors w-full"
                                             >
-                                                <span>{option.quantity} Questions (${(option.priceCents / 100).toFixed(2)})</span>
-                                                {option.shortSavingsText && (
-                                                  <span className="text-xs font-bold text-yellow-400 bg-yellow-400/20 px-2 py-1 rounded-full ml-2">
-                                                    {option.shortSavingsText}
+                                                <span className="font-semibold">{option.quantity} Questions</span>
+                                                <span className="text-sm">${(option.priceCents / 100).toFixed(2)}</span>
+                                                {option.savingsText && (
+                                                  <span className="mt-1 inline-block bg-green-500 text-white text-xs rounded-full px-2 py-0.5">
+                                                    {option.savingsText}
                                                   </span>
                                                 )}
                                             </button>
                                         ))}
-                                    </div>
+                                      </div>
+                                    )}
                                 </div>
                             )}
                             {isAuthEnabled ? (

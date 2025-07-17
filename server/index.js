@@ -24,12 +24,6 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 // For production, configure CORS to only allow your frontend domain
 app.use(cors()); 
 
-app.use((req, res, next) => {
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-  next();
-});
-
 // Request logging middleware
 app.use((req, res, next) => {
   logger.info(`Incoming Request: ${req.method} ${req.originalUrl}`);

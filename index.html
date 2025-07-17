@@ -8,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script>
       tailwind.config = {
+        darkMode: 'class',
         theme: {
           extend: {
             colors: {
@@ -28,7 +29,6 @@
                 'muted': '#9ca3af',
               }
             },
-            // The prose classes in PracticeView.tsx use this config for styling.
             typography: ({ theme }) => ({
               invert: {
                 css: {
@@ -47,10 +47,8 @@
             }),
           },
         },
-      };
+      }
     </script>
-  
-<link rel="stylesheet" href="/index.css">
 </head>
   <body class="bg-background-dark">
     <div id="root"></div>
