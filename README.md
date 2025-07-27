@@ -20,3 +20,18 @@ This contains everything you need to run your app locally.
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Troubleshooting
+
+**Error: `ECONNREFUSED`**
+
+If you see a connection refused error in your terminal, it likely means the Redis server is not running. This application uses Redis for caching and session management.
+
+To fix this, you need to start the Redis server. If you have Redis installed via Homebrew on macOS, you can start it with the following command:
+
+```sh
+brew services start redis
+```
+
+After starting Redis, you may need to restart your backend server (`npm start`) for it to connect properly.
+
