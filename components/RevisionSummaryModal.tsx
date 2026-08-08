@@ -18,9 +18,7 @@ const RevisionSummaryModal: React.FC<RevisionSummaryModalProps> = ({ skill, onCl
       setIsLoading(true);
       try {
         const response = await fetch(`/api/revision-summary/${skill.id}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
-          },
+          credentials: 'include',
         });
 
         if (response.ok) {

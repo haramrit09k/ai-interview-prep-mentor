@@ -54,17 +54,10 @@ export const generateAnswerForQuestion = async (questionText: string): Promise<s
 export const evaluateAnswer = async (questionText: string, userAnswer: string): Promise<EvaluationResponse> => {
   logger.debug('Sending evaluation request to backend for question:', questionText);
   try {
-    const token = localStorage.getItem('google_id_token');
-    if (!token) {
-      throw new Error('User is not authenticated.');
-    }
-
     const response = await fetch('/api/evaluate', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ questionText, userAnswer }),
     });
 

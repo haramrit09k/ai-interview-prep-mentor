@@ -12,6 +12,10 @@ const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
 const crypto = require('crypto');
 
+const cookieParser = require('cookie-parser');
+const { OAuth2Client } = require('google-auth-library');
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -22,8 +26,12 @@ const logger = require('./logger');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Middleware
-// For production, configure CORS to only allow your frontend domain
-app.use(cors()); 
+const corsOptions = {
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  credentials: true,
+};
+app.use(cors(corsOptions));
+app.use(cookieParser());
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -55,6 +63,37 @@ const getStartOfWeek = (date) => {
   d.setHours(0, 0, 0, 0);
   return d;
 };
+
+// --- Auth Endpoints ---
+app.post('/api/auth/login', express.json(), async (req, res) => {
+  const { token } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: 'Token required' });
+  }
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const isSecure = process.env.NODE_ENV === 'production';
+    res.cookie('google_id_token', token, {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: isSecure ? 'none' : 'lax',
+      maxAge: 3600 * 1000, // 1 hour matching Google token expiry
+    });
+    res.json({ userId: payload['sub'] });
+  } catch (err) {
+    logger.error('POST /api/auth/login: Token verification failed', err.message);
+    res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('google_id_token');
+  res.status(200).send('Logged out');
+});
 
 // --- API Routes ---
 app.get('/api/quota', authMiddleware, async (req, res) => {
@@ -142,29 +181,30 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
   if (req.userId) {
     // Authenticated user logic
     try {
-      const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
-      let storedQuestionMap = {};
-      if (rows.length > 0 && rows[0].unanswered_questions) {
-        storedQuestionMap = JSON.parse(rows[0].unanswered_questions);
-        logger.info(`GET /api/questions: Found stored questions for user ${req.userId}.`);
-      }
+      const { rows: storedRows } = await pool.query(
+        `SELECT q.id, q.text, q.level, q.skill_id
+         FROM user_unanswered_questions uuq
+         JOIN questions q ON q.id = uuq.question_id
+         WHERE uuq.user_id = $1 AND q.skill_id = $2 AND q.level = $3
+         LIMIT $4`,
+        [req.userId, skillId, level, requestedCount]
+      );
 
-      const questionsForLevel = storedQuestionMap[skillId]?.[level] || [];
       let questionsToReturn = [];
       let remainingCount = requestedCount;
 
-      if (questionsForLevel.length > 0) {
-        const numToTake = Math.min(requestedCount, questionsForLevel.length);
-        questionsToReturn = questionsForLevel.slice(0, numToTake);
-        remainingCount -= numToTake;
-        
-        if (storedQuestionMap[skillId] && storedQuestionMap[skillId][level]) {
-          delete storedQuestionMap[skillId][level];
-          if (Object.keys(storedQuestionMap[skillId]).length === 0) {
-            delete storedQuestionMap[skillId];
-          }
-        }
-        logger.info(`GET /api/questions: Returning ${numToTake} questions from storage for user ${req.userId} and clearing them.`);
+      if (storedRows.length > 0) {
+        questionsToReturn = storedRows.map(q => ({ text: q.text, level: q.level, skillId: q.skill_id }));
+        remainingCount -= storedRows.length;
+
+        // Delete the consumed questions from the join table
+        const consumedIds = storedRows.map(q => q.id);
+        const idPlaceholders = consumedIds.map((_, i) => `$${i + 2}`).join(', ');
+        await pool.query(
+          `DELETE FROM user_unanswered_questions WHERE user_id = $1 AND question_id IN (${idPlaceholders})`,
+          [req.userId, ...consumedIds]
+        );
+        logger.info(`GET /api/questions: Returned ${storedRows.length} stored questions for user ${req.userId} and removed them.`);
       }
 
       if (remainingCount > 0) {
@@ -172,9 +212,6 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
         const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount, skillId);
         questionsToReturn = [...questionsToReturn, ...newQuestions];
       }
-
-      await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
-      logger.info(`GET /api/questions: Updated unanswered questions in DB for user ${req.userId}.`);
 
       res.json({ questions: questionsToReturn });
 
@@ -237,33 +274,43 @@ app.post('/api/questions/save-unanswered', express.json(), authMiddleware, async
   }
 
   try {
-    const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
-    let storedQuestionMap = {};
-    if (rows.length > 0 && rows[0].unanswered_questions) {
-      storedQuestionMap = JSON.parse(rows[0].unanswered_questions);
-    }
-
-    unansweredQuestions.forEach(question => {
+    const isPostgres = process.env.NODE_ENV === 'production';
+    for (const question of unansweredQuestions) {
       const { skillId, level, text } = question;
-      if (!skillId || !level || !text) return; // Skip invalid questions
+      if (!skillId || !level || !text) continue;
 
-      if (!storedQuestionMap[skillId]) {
-        storedQuestionMap[skillId] = {};
-      }
-      if (!storedQuestionMap[skillId][level]) {
-        storedQuestionMap[skillId][level] = [];
-      }
-
-      // Avoid duplicates: check if the question text already exists for that skill and level
-      if (!storedQuestionMap[skillId][level].some(q => q.text === text)) {
-        storedQuestionMap[skillId][level].push(question);
-        logger.debug(`Adding new unanswered question for skill ${skillId}: "${text}"`);
+      if (isPostgres) {
+        await pool.query(
+          'INSERT INTO questions (text, level, skill_id) VALUES ($1, $2, $3) ON CONFLICT (text, skill_id, level) DO NOTHING',
+          [text, level, skillId]
+        );
       } else {
-        logger.debug(`Skipping duplicate unanswered question for skill ${skillId}: "${text}"`);
+        await pool.query(
+          'INSERT OR IGNORE INTO questions (text, level, skill_id) VALUES ($1, $2, $3)',
+          [text, level, skillId]
+        );
       }
-    });
 
-    await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
+      const { rows: qRows } = await pool.query(
+        'SELECT id FROM questions WHERE text = $1 AND skill_id = $2 AND level = $3',
+        [text, skillId, level]
+      );
+      if (qRows.length === 0) continue;
+      const questionId = qRows[0].id;
+
+      if (isPostgres) {
+        await pool.query(
+          'INSERT INTO user_unanswered_questions (user_id, question_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [req.userId, questionId]
+        );
+      } else {
+        await pool.query(
+          'INSERT OR IGNORE INTO user_unanswered_questions (user_id, question_id) VALUES ($1, $2)',
+          [req.userId, questionId]
+        );
+      }
+      logger.debug(`Saved unanswered question id=${questionId} for user ${req.userId}`);
+    }
     logger.info(`POST /api/questions/save-unanswered: Saved unanswered questions for user ${req.userId}.`);
     res.status(200).send('Unanswered questions saved');
   } catch (err) {
@@ -423,19 +470,39 @@ app.post('/api/session/save-on-exit', express.json(), authMiddleware, async (req
 
         // 1. Save unanswered questions
         if (unansweredQuestions && unansweredQuestions.length > 0) {
-            const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
-            let storedQuestionMap = (rows.length > 0 && rows[0].unanswered_questions) ? JSON.parse(rows[0].unanswered_questions) : {};
-
-            unansweredQuestions.forEach(question => {
+            const isPostgres = process.env.NODE_ENV === 'production';
+            for (const question of unansweredQuestions) {
                 const { skillId, level, text } = question;
-                if (!skillId || !level || !text) return;
-                if (!storedQuestionMap[skillId]) storedQuestionMap[skillId] = {};
-                if (!storedQuestionMap[skillId][level]) storedQuestionMap[skillId][level] = [];
-                if (!storedQuestionMap[skillId][level].some(q => q.text === text)) {
-                    storedQuestionMap[skillId][level].push(question);
+                if (!skillId || !level || !text) continue;
+                if (isPostgres) {
+                    await pool.query(
+                        'INSERT INTO questions (text, level, skill_id) VALUES ($1, $2, $3) ON CONFLICT (text, skill_id, level) DO NOTHING',
+                        [text, level, skillId]
+                    );
+                } else {
+                    await pool.query(
+                        'INSERT OR IGNORE INTO questions (text, level, skill_id) VALUES ($1, $2, $3)',
+                        [text, level, skillId]
+                    );
                 }
-            });
-            await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
+                const { rows: qRows } = await pool.query(
+                    'SELECT id FROM questions WHERE text = $1 AND skill_id = $2 AND level = $3',
+                    [text, skillId, level]
+                );
+                if (qRows.length === 0) continue;
+                const questionId = qRows[0].id;
+                if (isPostgres) {
+                    await pool.query(
+                        'INSERT INTO user_unanswered_questions (user_id, question_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                        [req.userId, questionId]
+                    );
+                } else {
+                    await pool.query(
+                        'INSERT OR IGNORE INTO user_unanswered_questions (user_id, question_id) VALUES ($1, $2)',
+                        [req.userId, questionId]
+                    );
+                }
+            }
             logger.info(`Saved ${unansweredQuestions.length} unanswered questions for user ${req.userId} on exit.`);
         }
 
