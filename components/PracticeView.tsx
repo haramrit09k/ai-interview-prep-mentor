@@ -73,10 +73,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     try {
       const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ quantity }),
       });
 

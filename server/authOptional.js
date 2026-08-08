@@ -4,17 +4,11 @@ const logger = require('./logger');
 
 async function authOptionalMiddleware(req, res, next) {
   logger.debug('authOptionalMiddleware: Received request.');
-  const authHeader = req.headers.authorization;
+  const token = req.cookies?.google_id_token;
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    logger.debug('authOptionalMiddleware: No valid Authorization header found. Proceeding as guest.');
-    return next(); // Proceed without a userId
-  }
-
-  const token = authHeader.split(' ')[1];
   if (!token) {
-    logger.debug('authOptionalMiddleware: Token missing from Bearer header. Proceeding as guest.');
-    return next(); // Proceed without a userId
+    logger.debug('authOptionalMiddleware: No auth cookie found. Proceeding as guest.');
+    return next();
   }
 
   try {

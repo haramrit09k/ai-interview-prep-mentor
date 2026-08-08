@@ -97,9 +97,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       const fetchQuota = async () => {
         try {
           const response = await fetch('/api/quota', {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
-            }
+            credentials: 'include',
           });
           if (response.ok) {
             const data = await response.json();
@@ -150,9 +148,8 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     answerHistoryRef.current = answerHistory;
   }, [answerHistory]);
 
-  const handleLoginSuccess = useCallback((credentialResponse: any) => {
+  const handleLoginSuccess = useCallback(async (credentialResponse: any) => {
     try {
-        console.log('credentialResponse:', credentialResponse);
         const decoded: { sub: string, name: string, email: string, picture: string } = jwtDecode(credentialResponse.credential);
         const profile: UserProfile = {
             id: decoded.sub,
@@ -160,9 +157,14 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             email: decoded.email,
             picture: decoded.picture
         };
+        // Send token to backend to be stored as an HttpOnly cookie
+        await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ token: credentialResponse.credential }),
+        });
         setUserProfile(profile);
-        // Store the ID token for backend calls
-        localStorage.setItem('google_id_token', credentialResponse.credential);
         setToastMessage('Successfully logged in!');
 
         // Close all modals on successful login
@@ -174,7 +176,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         setShowPurchaseModal(false);
 
     } catch (error) {
-        console.error("Error decoding JWT:", error);
+        console.error("Error during login:", error);
         alert("Failed to process login information.");
     }
   }, [setUserProfile, setLimitModal, setPracticeOptions, setIsCustomQuestionModalOpen, setRevisionModal, setIsWelcomeModalOpen, setShowPurchaseModal]);
@@ -183,8 +185,10 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
 
   const handleLogout = useCallback(() => {
     if (isAuthEnabled) {
+      // Clear the HttpOnly cookie on the backend (fire-and-forget)
+      fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+        .catch(e => logger.error('Failed to clear auth cookie:', e));
       setUserProfile(null);
-      localStorage.removeItem('google_id_token'); // Clear the ID token on logout
       logger.info('User logged out.');
       setToastMessage('Successfully logged out!');
     }
@@ -231,25 +235,13 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       return;
     }
 
-    if (isAuthenticated && !localStorage.getItem('google_id_token')) {
-      logger.warn('Authenticated user but no Google ID token found in localStorage. Please log in again.');
-      alert('Authentication token missing. Please log in again.');
-      setIsStartingSession(false);
-      return;
-    }
-    
     setIsStartingSession(true);
     setPracticeOptions({ isOpen: false, skill: null });
 
     try {
-        const headers: HeadersInit = {};
-        if (isAuthenticated) {
-            headers['Authorization'] = `Bearer ${localStorage.getItem('google_id_token')}`;
-        }
-
         logger.info(`Fetching questions for skill: ${skill.name}, level: ${level}, count: ${count}`);
         const response = await fetch(`/api/questions?skillName=${encodeURIComponent(skill.name)}&level=${encodeURIComponent(level)}&count=${count}&skillId=${skill.id}`, {
-            headers,
+            credentials: 'include',
         });
 
         // Get response text first
@@ -323,7 +315,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
 
         // Use navigator.sendBeacon to reliably send data on unload
         // Note: This is a fire-and-forget request. We won't get a response.
-        if (isAuthenticated && localStorage.getItem('google_id_token')) {
+        if (isAuthenticated) {
             const unansweredQuestions = practiceSessionRef.current.questions.filter(q => !practiceSessionRef.current?.consumedQuestionIds.has(q.id));
 
             const payload = {
@@ -352,12 +344,6 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
 
   const endPracticeSession = useCallback(async () => {
     if (practiceSession && isAuthenticated) {
-      if (!localStorage.getItem('google_id_token')) {
-        logger.warn('Authenticated user but no Google ID token found in localStorage. Cannot save unanswered questions or generate summary.');
-        setPracticeSession(null);
-        return;
-      }
-
       const unansweredQuestions = practiceSession.questions.filter(q => !practiceSession.consumedQuestionIds.has(q.id));
 
       if (unansweredQuestions.length > 0) {
@@ -365,10 +351,8 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         try {
           await fetch('/api/questions/save-unanswered', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
-            },
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({ unansweredQuestions }),
           });
         } catch (error) {
@@ -392,10 +376,8 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       try {
         const response = await fetch('/api/revision-summary', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
-          },
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             skillId: practiceSession.skill.id,
             skillName: practiceSession.skill.name,
@@ -438,10 +420,8 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         try {
             const response = await fetch('/api/quota/increment', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
-                },
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
             });
             if (response.ok) {
                 // Optimistically update local state
@@ -495,10 +475,8 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     try {
       const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ quantity, priceCents }),
       });
 
@@ -606,9 +584,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             try {
               await fetch('/api/user/seen-welcome-modal', {
                 method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
-                },
+                credentials: 'include',
               });
               setHasSeenWelcomeModalAuth(true);
             } catch (error) {

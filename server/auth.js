@@ -4,16 +4,10 @@ const logger = require('./logger');
 
 async function authMiddleware(req, res, next) {
   logger.debug('authMiddleware: Received request.');
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    logger.warn('authMiddleware: Authorization header missing.');
-    return res.status(401).json({ error: 'Authorization header missing' });
-  }
-
-  const token = authHeader.split(' ')[1];
+  const token = req.cookies?.google_id_token;
   if (!token) {
-    logger.warn('authMiddleware: Token missing.');
-    return res.status(401).json({ error: 'Token missing' });
+    logger.warn('authMiddleware: Auth cookie missing.');
+    return res.status(401).json({ error: 'Not authenticated' });
   }
 
   try {
