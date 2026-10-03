@@ -7,6 +7,7 @@ import PracticeView from './components/PracticeView';
 import CustomQuestionModal from './components/CustomQuestionModal';
 import StartPracticeModal from './components/StartPracticeModal';
 import ReviewModal from './components/ReviewModal';
+import { updateRating } from './utils/rating';
 import Header from './components/Header';
 import { LimitReachedModal } from './components/LimitReachedModal';
 import { WelcomeModal } from './components/WelcomeModal';
@@ -25,13 +26,6 @@ import Footer from './components/Footer';
 // Helper to shuffle array
 const shuffleArray = <T,>(array: T[]): T[] => {
   return [...array].sort(() => Math.random() - 0.5);
-};
-
-const RATING_CHANGE: Record<AnswerOutcome, number> = {
-  correct: 10,
-  partially_correct: 5,
-  incorrect: -5,
-  idk: -5,
 };
 
 // --- QUOTA DEFINITIONS ---
@@ -435,9 +429,8 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     setSkills(prevSkills => 
         prevSkills.map(skill => {
             if (skill.id === question.skillId) {
-                const change = RATING_CHANGE[classification];
-                const newRating = Math.max(0, Math.min(100, skill.rating + change));
-                return { ...skill, rating: newRating };
+                // The change depends on the level the question was asked at, and each level has a ceiling.
+                return { ...skill, rating: updateRating(skill.rating, classification, question.level) };
             }
             return skill;
         })
