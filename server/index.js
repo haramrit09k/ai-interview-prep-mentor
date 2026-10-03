@@ -13,6 +13,7 @@ const { LIMITS, LEVELS, cleanBlock } = require('./prompts');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
+const { takeGuestAllowance, refundGuestAllowance, GUEST_LIMIT_BODY, GUEST_MAX_QUESTIONS } = require('./guestLimit');
 const crypto = require('crypto');
 
 // Authoritative price list. Keep in sync with config/purchaseOptions.ts.
@@ -201,12 +202,18 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
       res.status(500).json({ error: 'Server Error' });
     }
   } else {
-    // Guest user logic
+    // Guest user logic. Guests get a short round, and only a few rounds per IP address.
     try {
-      logger.info(`GET /api/questions: Generating ${requestedCount} new questions for guest user.`);
-      const newQuestions = await generateQuestionsForSkill(skillName, level, requestedCount, skillId);
+      if (!(await takeGuestAllowance(req, 'sessions'))) {
+        logger.info(`GET /api/questions: Guest allowance used up for ${req.ip}.`);
+        return res.status(403).json(GUEST_LIMIT_BODY);
+      }
+      const guestCount = Math.min(requestedCount, GUEST_MAX_QUESTIONS);
+      logger.info(`GET /api/questions: Generating ${guestCount} new questions for guest user.`);
+      const newQuestions = await generateQuestionsForSkill(skillName, level, guestCount, skillId);
       res.json({ questions: newQuestions });
     } catch (err) {
+      await refundGuestAllowance(req, 'sessions');
       logger.error(`GET /api/questions: Error for guest user:`, err.message);
       res.status(500).json({ error: 'Server Error' });
     }
@@ -219,6 +226,12 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
 
   if (typeof questionText !== 'string' || !questionText.trim() || typeof userAnswer !== 'string') {
     return res.status(400).json({ error: 'Missing questionText or userAnswer' });
+  }
+
+  // Guests only get a limited number of graded answers per IP address, checked after the input is known to be valid.
+  if (!(await takeGuestAllowance(req, 'evaluations'))) {
+    logger.info(`POST /api/evaluate: Guest allowance used up for ${req.ip}.`);
+    return res.status(403).json(GUEST_LIMIT_BODY);
   }
 
   try {
@@ -268,6 +281,7 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
     res.json(evaluation);
   } catch (error) {
     // Nothing was cached above, so a transient Gemini failure is not remembered.
+    await refundGuestAllowance(req, 'evaluations');
     logger.error('Error in /api/evaluate:', error);
     res.status(502).json({ error: 'The AI mentor is unavailable right now. Please try again in a moment.' });
   }

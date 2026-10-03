@@ -11,6 +11,17 @@ export interface EvaluationMeta {
   delivery?: DeliveryStats | null;
 }
 
+/** The server says this guest has used up the free practice that is allowed per network. */
+export class GuestLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GuestLimitError';
+  }
+}
+
+/** True for the response the server sends when a guest's free allowance is gone. */
+export const isGuestLimitBody = (status: number, data: any): boolean => status === 403 && data?.code === 'GUEST_LIMIT';
+
 // All Gemini calls happen on the server (see server/geminiService.js).
 // The API key must never be bundled into client code.
 
@@ -32,7 +43,11 @@ export const evaluateAnswer = async (questionText: string, userAnswer: string, m
   });
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response, 'Failed to evaluate answer'));
+    const text = await response.text().catch(() => '');
+    let data: any = null;
+    try { data = JSON.parse(text); } catch { /* not JSON, fall through to the generic message */ }
+    if (isGuestLimitBody(response.status, data)) throw new GuestLimitError(data.error);
+    throw new Error(data?.error || data?.message || `Failed to evaluate answer (HTTP ${response.status})`);
   }
 
   return (await response.json()) as EvaluationResponse;

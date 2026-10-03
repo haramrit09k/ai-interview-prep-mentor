@@ -18,7 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import logger from './src/logger'; // Import the logger
-import { readErrorMessage } from './services/gemini';
+import { readErrorMessage, isGuestLimitBody } from './services/gemini';
 import ProgressModal from './components/ProgressModal';
 import Footer from './components/Footer';
 import { fetchInsights } from './services/progress';
@@ -256,6 +256,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         }
 
         if (!response.ok) {
+            if (isGuestLimitBody(response.status, data)) {
+                // The server remembers guests by network address, so clearing site data does not bring sessions back.
+                setAnonSessionsUsed(SESSIONS_LIMIT_ANON);
+                setLimitModal({ isOpen: true, reason: 'sessions' });
+                return;
+            }
             if (response.status === 401) {
                 handleAuthError(handleLogout, 'Failed to fetch questions: Unauthorized.');
             }
@@ -508,8 +514,22 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     return () => { cancelled = true; };
   }, [isAuthenticated, isOnHome]);
 
+  // Shown wherever a guest is asked to sign in.
+  const signInButton = (
+    <GoogleLogin
+      onSuccess={handleLoginSuccess}
+      onError={() => {
+        logger.error('Google Login Failed.');
+        alert('Google login failed. Please try again.');
+      }}
+      theme="filled_black"
+      text="signin_with"
+      shape="pill"
+    />
+  );
+
   if (practiceSession) {
-    return <PracticeView session={practiceSession} onEndSession={endPracticeSession} onNavigate={navigateQuestion} onQuestionComplete={handleQuestionComplete} onPracticeAgain={handlePracticeAgain} questionsRemaining={questionsRemaining} isAuthenticated={isAuthenticated} />;
+    return <PracticeView session={practiceSession} onEndSession={endPracticeSession} onNavigate={navigateQuestion} onQuestionComplete={handleQuestionComplete} onPracticeAgain={handlePracticeAgain} questionsRemaining={questionsRemaining} isAuthenticated={isAuthenticated} signInButton={isAuthEnabled ? signInButton : null} />;
   }
 
   return (
@@ -584,18 +604,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           onClose={() => setLimitModal({ isOpen: false, reason: null })}
           onUpgrade={handlePurchaseQuestions}
           // Render GoogleLogin component directly within the modal for convenience
-          googleLoginComponent={(
-            <GoogleLogin
-              onSuccess={handleLoginSuccess}
-              onError={() => {
-                logger.error('Google Login Failed from LimitReachedModal.');
-                alert('Google login failed. Please try again.');
-              }}
-              theme="filled_black"
-              text="signin_with"
-              shape="pill"
-            />
-          )}
+          googleLoginComponent={signInButton}
         />
       )}
       {isWelcomeModalOpen && <WelcomeModal onClose={() => setIsWelcomeModalOpen(false)} />}

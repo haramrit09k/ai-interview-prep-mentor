@@ -9,6 +9,9 @@ process.env.SQLITE_DB_PATH = ':memory:';
 process.env.NODE_ENV = 'test';
 process.env.STRIPE_SECRET_KEY = 'sk_test_not_a_real_key';
 process.env.GEMINI_API_KEY = 'not-a-real-key';
+// The guest allowance has its own tests below. Everywhere else it is set high so it never gets in the way.
+process.env.GUEST_SESSIONS_LIMIT = '1000';
+process.env.GUEST_EVALUATIONS_LIMIT = '1000';
 
 const stub = (file, exports) => {
   const resolved = require.resolve(path.join('../server', file));
@@ -177,9 +180,12 @@ test('questions: validates level, caps the count, and only signed-in users get r
   assert.equal((await call('GET', url())).status, 200);
   assert.deepEqual(questionCalls[0][4] ?? [], []);
 
-  // a huge count is capped at one session's worth
+  // a huge count is capped at one session's worth, and a guest's round is shorter still
   questionCalls = [];
   await call('GET', '/api/questions?skillName=Java&level=Mid-level&skillId=java&count=100000');
+  assert.equal(questionCalls[0][2], 5);
+  questionCalls = [];
+  await call('GET', '/api/questions?skillName=Java&level=Mid-level&skillId=java&count=100000', { token: 'carol' });
   assert.equal(questionCalls[0][2], 15);
 
   // a signed-in user's previously answered questions for that skill are passed along
@@ -309,4 +315,45 @@ test('success responses are not labelled as errors', async () => {
   const res = await call('POST', '/api/quota/increment', { token: 'quitter', json: {} });
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { ok: true });
+});
+
+test('guests get a limited number of rounds and graded answers per network, and signed in users are not counted', async () => {
+  const clearGuestKeys = () => { for (const k of [...cache.keys()]) if (k.startsWith('guest:')) cache.delete(k); };
+  const guestUrl = '/api/questions?skillName=Java&level=Mid-level&skillId=java&count=5';
+  clearGuestKeys();
+  process.env.GUEST_SESSIONS_LIMIT = '2';
+  process.env.GUEST_EVALUATIONS_LIMIT = '3';
+  try {
+    // two rounds are allowed, the third is refused with a code the app can act on
+    assert.equal((await call('GET', guestUrl)).status, 200);
+    assert.equal((await call('GET', guestUrl)).status, 200);
+    const third = await call('GET', guestUrl);
+    assert.equal(third.status, 403);
+    assert.equal((await third.json()).code, 'GUEST_LIMIT');
+    // signed in users are never counted
+    assert.equal((await call('GET', guestUrl, { token: 'dana' })).status, 200);
+
+    // graded answers are limited too, and invalid requests do not use any up
+    assert.equal((await call('POST', '/api/evaluate', { json: { questionText: '', userAnswer: 'a' } })).status, 400);
+    for (let i = 0; i < 3; i += 1) {
+      assert.equal((await call('POST', '/api/evaluate', { json: { questionText: `guest limit ${i}`, userAnswer: 'a' } })).status, 200);
+    }
+    const blocked = await call('POST', '/api/evaluate', { json: { questionText: 'guest limit 4', userAnswer: 'a' } });
+    assert.equal(blocked.status, 403);
+    assert.equal((await blocked.json()).code, 'GUEST_LIMIT');
+    assert.equal((await call('POST', '/api/evaluate', { token: 'dana', json: { questionText: 'guest limit 4', userAnswer: 'a' } })).status, 200);
+
+    // an AI failure gives the answer back, so an outage does not use up a guest's allowance
+    clearGuestKeys();
+    geminiMode = 'fail';
+    for (let i = 0; i < 5; i += 1) {
+      assert.equal((await call('POST', '/api/evaluate', { json: { questionText: `outage ${i}`, userAnswer: 'a' } })).status, 502);
+    }
+    geminiMode = 'ok';
+    assert.equal((await call('POST', '/api/evaluate', { json: { questionText: 'after outage', userAnswer: 'a' } })).status, 200);
+  } finally {
+    process.env.GUEST_SESSIONS_LIMIT = '1000';
+    process.env.GUEST_EVALUATIONS_LIMIT = '1000';
+    clearGuestKeys();
+  }
 });

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Question, AnswerOutcome, DeliveryStats, ExperienceLevel, RatingResult } from '../types';
-import { evaluateAnswer, readErrorMessage } from '../services/gemini';
+import { evaluateAnswer, readErrorMessage, GuestLimitError } from '../services/gemini';
 import { ChevronLeftIcon, ChevronRightIcon, BrainCircuitIcon, SpinnerIcon } from './Icons';
 import MarkdownRenderer from './MarkdownRenderer';
 import { LimitReachedModal } from './LimitReachedModal';
@@ -31,9 +31,10 @@ interface PracticeViewProps {
   onPracticeAgain: (level: ExperienceLevel) => void;
   questionsRemaining: number; // Receive quota from App.tsx
   isAuthenticated: boolean; // Voice answers and progress tracking need a signed-in user
+  signInButton?: React.ReactNode; // Offered to guests whose free practice is used up
 }
 
-const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNavigate, onQuestionComplete, onPracticeAgain, questionsRemaining, isAuthenticated }) => {
+const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNavigate, onQuestionComplete, onPracticeAgain, questionsRemaining, isAuthenticated, signInButton = null }) => {
   const currentQuestion: Question = session.questions[session.currentQuestionIndex];
 
   const [userAnswer, setUserAnswer] = useState('');
@@ -101,7 +102,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
         setResults(prev => ({ ...prev, [currentQuestion.id]: { outcome: finalOutcome, ...rating } }));
       }
     } catch (error) {
-      setEvaluationError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
+      if (error instanceof GuestLimitError) {
+        setShowLimitModal(true);
+      } else {
+        setEvaluationError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -323,10 +328,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     <>
       {showLimitModal && (
         <LimitReachedModal 
-          reason="quota" 
+          reason={isAuthenticated ? 'quota' : 'sessions'}
           onClose={onEndSession} 
           onUpgrade={handleUpgrade}
-          googleLoginComponent={null}
+          googleLoginComponent={signInButton}
         />
       )}
       <div className="min-h-screen flex flex-col p-4 sm:p-8">
