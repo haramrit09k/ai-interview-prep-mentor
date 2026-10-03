@@ -10,7 +10,8 @@ if (!API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
-const model = 'gemini-2.5-flash';
+// Override with GEMINI_MODEL without a code change when Google retires or limits a model.
+const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 
 /**
  * Cleans a string that might contain a JSON object wrapped in markdown.
@@ -74,7 +75,7 @@ ${levelSpecificInstructions}
       contents: contents,
       config: {
         responseMimeType: "application/json",
-        maxOutputTokens: 3000,
+        maxOutputTokens: 8192,
         safetySettings: [
           { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
           { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -137,7 +138,7 @@ const evaluateAnswer = async (questionText, userAnswer) => {
           contents: prompt,
           config: {
               responseMimeType: "application/json",
-              maxOutputTokens: 1500,
+              maxOutputTokens: 4096,
               safetySettings: [
                 { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
                 { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },

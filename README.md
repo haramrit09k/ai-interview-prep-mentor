@@ -23,6 +23,7 @@ AI Interview Prep Mentor is a full stack web application that helps you practice
 ## Environment variables
 Create a `.env.local` file in the project root. Important keys:
 - `GEMINI_API_KEY` – API key for Gemini
+- `GEMINI_MODEL` – optional Gemini model id, defaults to `gemini-3.8-flash`
 - `GOOGLE_CLIENT_ID` – OAuth client id for Google login
 - `STRIPE_SECRET_KEY` – key for creating checkout sessions
 - `STRIPE_WEBHOOK_SECRET` – webhook validation secret
