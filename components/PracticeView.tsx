@@ -1,10 +1,12 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import type { Question, AnswerOutcome } from '../types';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import type { Question, AnswerOutcome, DeliveryStats } from '../types';
 import { evaluateAnswer, readErrorMessage } from '../services/gemini';
 import { ChevronLeftIcon, ChevronRightIcon, BrainCircuitIcon, SpinnerIcon } from './Icons';
 import MarkdownRenderer from './MarkdownRenderer';
 import { LimitReachedModal } from './LimitReachedModal';
+import VoiceRecorder from './VoiceRecorder';
+import DeliveryCard from './DeliveryCard';
 
 interface PracticeSession {
   skill: { id: string; name: string };
@@ -17,9 +19,10 @@ interface PracticeViewProps {
   onNavigate: (direction: 'next' | 'prev') => void;
   onQuestionComplete: (args: { question: Question; classification: AnswerOutcome; conceptsKnown?: string[]; conceptsToReview?: string[] }) => void;
   questionsRemaining: number; // Receive quota from App.tsx
+  isAuthenticated: boolean; // Voice answers and progress tracking need a signed-in user
 }
 
-const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNavigate, onQuestionComplete, questionsRemaining }) => {
+const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNavigate, onQuestionComplete, questionsRemaining, isAuthenticated }) => {
   const currentQuestion: Question = session.questions[session.currentQuestionIndex];
 
   const [userAnswer, setUserAnswer] = useState('');
@@ -29,6 +32,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
   const [viewedAnswer, setViewedAnswer] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const [delivery, setDelivery] = useState<DeliveryStats | null>(null);
+  const [transcriptNotice, setTranscriptNotice] = useState(false);
+  const feedbackHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const handleSubmission = useCallback(async (isIdk: boolean) => {
     if (!currentQuestion) return;
@@ -46,7 +52,12 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     try {
       // An empty answer for "I Don't Know" still gets us the mentor answer and concepts to review.
       const { mentorAnswer, feedback, classification, conceptsKnown, conceptsToReview } =
-        await evaluateAnswer(currentQuestion.text, isIdk ? "" : userAnswer);
+        await evaluateAnswer(currentQuestion.text, isIdk ? "" : userAnswer, {
+          skillId: session.skill.id,
+          skillName: session.skill.name,
+          isIdk,
+          delivery: isIdk ? null : delivery,
+        });
 
       setViewedAnswer(true);
       setMentorAnswer(mentorAnswer);
@@ -62,7 +73,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     } finally {
       setIsSubmitting(false);
     }
-  }, [currentQuestion, userAnswer, onQuestionComplete, questionsRemaining, viewedAnswer]);
+  }, [currentQuestion, userAnswer, onQuestionComplete, questionsRemaining, viewedAnswer, delivery, session.skill.id, session.skill.name]);
 
   useEffect(() => {
     setUserAnswer('');
@@ -71,7 +82,20 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     setViewedAnswer(false);
     setIsSubmitting(false);
     setEvaluationError(null);
+    setDelivery(null);
+    setTranscriptNotice(false);
   }, [session.currentQuestionIndex, session.skill.id]);
+
+  // Move keyboard and screen reader focus to the feedback as soon as it is ready.
+  useEffect(() => {
+    if (viewedAnswer && !isSubmitting) feedbackHeadingRef.current?.focus();
+  }, [viewedAnswer, isSubmitting]);
+
+  const handleVoiceResult = useCallback((transcript: string, stats: DeliveryStats) => {
+    setUserAnswer(transcript.slice(0, 5000));
+    setDelivery(stats);
+    setTranscriptNotice(true);
+  }, []);
 
   const handleUpgrade = useCallback(async (quantity: number) => {
     
@@ -102,7 +126,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
   const renderContent = () => {
     if (isSubmitting) {
       return (
-        <div className="flex flex-col items-center justify-center min-h-[250px] text-text-secondary">
+        <div role="status" className="flex flex-col items-center justify-center min-h-[250px] text-text-secondary">
           <SpinnerIcon className="w-10 h-10 border-4 border-brand-primary" />
           <p className="mt-4 text-lg">Your mentor is thinking...</p>
         </div>
@@ -113,7 +137,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
       return (
         <div className="space-y-6">
           <div>
-            <h3 className="text-lg sm:text-xl font-bold text-brand-light mb-2">Feedback on Your Answer</h3>
+            <h3 ref={feedbackHeadingRef} tabIndex={-1} className="text-lg sm:text-xl font-bold text-brand-light mb-2 outline-none focus-visible:ring-2 focus-visible:ring-brand-light rounded">Feedback on Your Answer</h3>
             <div className="bg-background-dark/50 p-3 sm:p-4 rounded-lg text-sm sm:text-base">
                 <MarkdownRenderer content={feedback} />
             </div>
@@ -124,6 +148,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
                 <MarkdownRenderer content={mentorAnswer} />
             </div>
           </div>
+          {delivery && <DeliveryCard stats={delivery} />}
         </div>
       );
     }
@@ -135,14 +160,25 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
             {evaluationError} Your answer is still here, so you can submit it again.
           </div>
         )}
+        {isAuthenticated ? (
+          <VoiceRecorder onResult={handleVoiceResult} disabled={isSubmitting} />
+        ) : (
+          <p className="text-sm text-text-muted">Sign in to answer out loud and get feedback on your pace and filler words.</p>
+        )}
+        {transcriptNotice && (
+          <p role="status" className="text-sm text-text-secondary bg-background-dark/50 rounded-lg p-3">
+            This is what we heard. Fix anything we got wrong, then submit for feedback.
+          </p>
+        )}
+        <label htmlFor="answer-box" className="sr-only">Your answer</label>
         <textarea
+            id="answer-box"
             rows={6}
             value={userAnswer}
             onChange={(e) => setUserAnswer(e.target.value)}
             placeholder="Type your answer here..."
             maxLength={5000} // Limit input to approximately 1000 words
             className="w-full bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-3"
-            aria-label="Your Answer"
         />
         <div className="text-right text-sm text-text-muted mt-1">
           {userAnswer.length}/5000 characters

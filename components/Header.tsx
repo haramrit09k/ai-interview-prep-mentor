@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { UserProfile } from '../types';
-import { LogoutIcon, QuestionMarkCircleIcon, Bars3Icon } from './Icons';
+import { LogoutIcon, QuestionMarkCircleIcon, Bars3Icon, ChartBarIcon } from './Icons';
 import { BrainIcon } from './BrainIcon';
 import { GoogleLogin } from '@react-oauth/google';
 
@@ -14,11 +14,12 @@ interface HeaderProps {
     isAuthenticated: boolean;
     onPurchaseQuestions: (quantity: number, priceCents: number) => void;
     onOpenWelcomeModal: () => void;
+    onOpenProgress: () => void;
     setShowPurchaseModal: (show: boolean) => void;
     nextResetDate: string | null; // New prop for next reset date
 }
 
-const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onOpenWelcomeModal, setShowPurchaseModal, nextResetDate }) => {
+const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onOpenWelcomeModal, onOpenProgress, setShowPurchaseModal, nextResetDate }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
@@ -81,6 +82,14 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                             >
                                 <QuestionMarkCircleIcon className="w-6 h-6" />
                             </button>
+                            {isAuthenticated && (
+                                <button
+                                    onClick={onOpenProgress}
+                                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-text-secondary font-semibold hover:bg-background-light hover:text-text-primary focus-visible:ring-2 focus-visible:ring-brand-light transition-colors"
+                                >
+                                    <ChartBarIcon className="w-5 h-5" /> Progress
+                                </button>
+                            )}
                             {isAuthenticated && (
                                 <button
                                     onClick={() => setShowPurchaseModal(true)}
@@ -177,6 +186,14 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                                         </span>
                                     )}
                                 </div>
+                            )}
+                            {isAuthenticated && (
+                                <button
+                                    onClick={() => { onOpenProgress(); setIsMobileMenuOpen(false); }}
+                                    className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors text-sm w-full max-w-xs"
+                                >
+                                    <ChartBarIcon className="w-5 h-5" /> Progress
+                                </button>
                             )}
                             {isAuthenticated && (
                                 <button

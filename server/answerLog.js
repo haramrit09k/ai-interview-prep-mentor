@@ -1,0 +1,46 @@
+const crypto = require('crypto');
+const db = require('./db');
+
+const MAX_ROWS = 2000; // plenty for insights, and keeps the query bounded
+const clip = (value, max) => String(value ?? '').slice(0, max);
+const cleanConcepts = (list) =>
+  JSON.stringify((Array.isArray(list) ? list : []).filter((c) => typeof c === 'string').slice(0, 10).map((c) => clip(c, 100)));
+
+async function insertAnswer({ userId, skillId, skillName, questionText, outcome, conceptsKnown, conceptsToReview, delivery }) {
+  await db.query(
+    `INSERT INTO answer_log
+      (id, user_id, skill_id, skill_name, question_text, outcome, concepts_known, concepts_to_review,
+       duration_sec, word_count, wpm, filler_count, answered_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [
+      crypto.randomUUID(),
+      userId,
+      clip(skillId, 100),
+      clip(skillName, 100),
+      clip(questionText, 1000),
+      outcome,
+      cleanConcepts(conceptsKnown),
+      cleanConcepts(conceptsToReview),
+      delivery ? delivery.durationSec : null,
+      delivery ? delivery.wordCount : null,
+      delivery ? delivery.wpm : null,
+      delivery ? delivery.fillerTotal : null,
+      new Date().toISOString(),
+    ]
+  );
+}
+
+/** Most recent answers for a user, returned oldest first. */
+async function listAnswers(userId) {
+  const { rows } = await db.query(
+    'SELECT * FROM answer_log WHERE user_id = $1 ORDER BY answered_at DESC LIMIT ' + MAX_ROWS,
+    [userId]
+  );
+  return rows.reverse();
+}
+
+async function deleteAnswers(userId) {
+  await db.query('DELETE FROM answer_log WHERE user_id = $1', [userId]);
+}
+
+module.exports = { insertAnswer, listAnswers, deleteAnswers };

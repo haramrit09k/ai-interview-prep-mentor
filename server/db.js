@@ -131,6 +131,24 @@ db.query(createTableSql)
         });
     }
   })
+  .then(() => db.query(`
+    CREATE TABLE IF NOT EXISTS answer_log (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      skill_id TEXT NOT NULL,
+      skill_name TEXT NOT NULL,
+      question_text TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      concepts_known TEXT,
+      concepts_to_review TEXT,
+      duration_sec INTEGER,
+      word_count INTEGER,
+      wpm INTEGER,
+      filler_count INTEGER,
+      answered_at TEXT NOT NULL
+    );
+  `))
+  .then(() => db.query('CREATE INDEX IF NOT EXISTS idx_answer_log_user_time ON answer_log (user_id, answered_at);'))
   .then(() => logger.info('Database schema initialization complete.'))
   .catch(err => logger.error('Error initializing database schema', err));
 

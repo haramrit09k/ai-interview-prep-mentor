@@ -51,3 +51,43 @@ export interface AuthQuota {
   questionsUsed: number;
   lastResetDate: string; // YYYY-MM-DD format
 }
+
+/** Delivery coaching for a spoken answer. Computed on the server from the transcript. */
+export interface DeliveryStats {
+  durationSec: number;
+  wordCount: number;
+  wpm: number | null; // null when the answer was too short to judge
+  paceLabel: 'slow' | 'relaxed' | 'steady' | 'brisk' | 'fast' | null;
+  paceText: string | null;
+  fillerTotal: number;
+  fillerPer100: number;
+  fillers: { word: string; count: number }[];
+  tips: string[];
+}
+
+export type Trend = 'up' | 'down' | 'steady' | 'new';
+
+export interface Insights {
+  totals: {
+    answers: number;
+    activeDays: number;
+    currentStreak: number;
+    longestStreak: number;
+    practicedToday: boolean;
+    last7Days: { answers: number; accuracy: number | null };
+    previous7Days: { answers: number; accuracy: number | null };
+    accuracyChange: number | null;
+  };
+  skills: { skillId: string; name: string; attempts: number; accuracy: number | null; trend: Trend; lastPracticed: string }[];
+  gaps: { concept: string; timesMissed: number; skill: string; lastSeen: string }[];
+  mastered: { concept: string; skill: string; masteredAt: string; previouslyMissed: number }[];
+  delivery: {
+    spokenAnswers: number;
+    avgWpm?: number | null;
+    inTypicalRange?: boolean | null;
+    avgFillersPer100?: number;
+    fillerTrend?: 'improving' | 'worsening' | 'steady' | 'new';
+    recent?: { at: string; wpm: number | null; fillersPer100: number }[];
+  };
+  nextStep: { type: string; title: string; detail: string };
+}
