@@ -122,12 +122,16 @@ async function chargeForGrading(userId, questionText) {
     // A free try of a question already paid for today. Someone with no questions left can still use these.
   }
   await writeAttempts(key, attempts + 1);
+  if (source) await adjustGraded(userId, 1); // answering a question frees a place for a new one
 
   return {
     ok: true,
     release: async () => {
       try {
-        if (source) await refundQuestion(userId, source);
+        if (source) {
+          await refundQuestion(userId, source);
+          await adjustGraded(userId, -1);
+        }
         await writeAttempts(key, attempts);
       } catch (err) {
         logger.error(`Quota: could not give back a question for user ${userId}:`, err.message);
@@ -164,10 +168,40 @@ async function refundDailyVoice(userId) {
   await writeAttempts(key, (await readAttempts(key)) - 1, 2 * DAY_SECONDS);
 }
 
+// Generating questions is what costs the most (one model call can return 15), and nothing is charged for it, so
+// without a limit someone could generate questions all day, answer them somewhere else, and never spend a question.
+// Instead, each user may have a limited number of questions generated for them that they have not answered yet.
+// Answering one (which does cost a question) frees a place, so generation can only run so far ahead of real use.
+// Unanswered questions are saved and shown again first, so normal use never gets near the limit.
+const openLimit = () => dailyLimit('OPEN_QUESTIONS_LIMIT', 30);
+
+const OPEN_QUESTIONS_BODY = {
+  error: 'You have a lot of questions you have not answered yet. Answer some of them first, and you can get more. If you have already answered a lot, try again tomorrow.',
+  code: 'OPEN_QUESTIONS_LIMIT',
+};
+
+/** How many new questions can be generated for this user right now. */
+async function freshQuestionAllowance(userId) {
+  const generated = await readAttempts(dailyKey('generated', userId));
+  const graded = await readAttempts(dailyKey('graded', userId));
+  const open = Math.max(0, generated - graded);
+  return Math.max(0, openLimit() - open);
+}
+
+async function recordGenerated(userId, count) {
+  const key = dailyKey('generated', userId);
+  await writeAttempts(key, (await readAttempts(key)) + count, 2 * DAY_SECONDS);
+}
+
+const adjustGraded = async (userId, change) => {
+  const key = dailyKey('graded', userId);
+  await writeAttempts(key, (await readAttempts(key)) + change, 2 * DAY_SECONDS);
+};
+
 /** The numbers the app needs to stay in step with the server. */
 async function quotaSnapshot(userId) {
   const quota = await loadQuota(userId);
   return { questionsUsed: quota.questionsUsed, bonusQuestions: quota.bonusQuestions };
 }
 
-module.exports = { takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, getStartOfWeek, loadQuota, remainingQuestions, spendQuestion, refundQuestion, chargeForGrading, quotaSnapshot, QUOTA_EXCEEDED_BODY, weeklyLimit };
+module.exports = { freshQuestionAllowance, recordGenerated, OPEN_QUESTIONS_BODY, takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, getStartOfWeek, loadQuota, remainingQuestions, spendQuestion, refundQuestion, chargeForGrading, quotaSnapshot, QUOTA_EXCEEDED_BODY, weeklyLimit };

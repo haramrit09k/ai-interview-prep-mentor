@@ -282,6 +282,11 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
                 setLimitModal({ isOpen: true, reason: 'quota' });
                 return;
             }
+            if (data?.code === 'OPEN_QUESTIONS_LIMIT') {
+                // Not a fault: too many generated questions are still waiting to be answered.
+                alert(data.error);
+                return;
+            }
             if (response.status === 401) {
                 handleAuthError(handleLogout, 'Failed to fetch questions: Unauthorized.');
             }
@@ -353,21 +358,29 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   // Effect to handle saving session data on page unload
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      // Check if there's an active practice session that needs saving.
-      if (practiceSessionRef.current && practiceSessionRef.current.consumedQuestionIds.size > 0) {
+      const session = practiceSessionRef.current;
+      if (!session) return;
+
+      // Only warn when there is something to lose: answers in this session.
+      if (session.consumedQuestionIds.size > 0) {
         // Most modern browsers do not display this message, but it's required for the event to trigger.
         event.preventDefault();
         event.returnValue = 'You have an active session. Are you sure you want to leave?';
+      }
 
-        // Use navigator.sendBeacon to reliably send data on unload
-        // Note: This is a fire-and-forget request. We won't get a response.
-        if (isAuthenticated && localStorage.getItem('google_id_token')) {
-            const unansweredQuestions = practiceSessionRef.current.questions.filter(q => !practiceSessionRef.current?.consumedQuestionIds.has(q.id));
-
-            const payload = { unansweredQuestions };
-
-            const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-            navigator.sendBeacon('/api/session/save-on-exit', blob);
+      // Save the questions that were not answered, so they are shown first next time and do not count as open
+      // questions. sendBeacon cannot send the sign in header the server needs, so this is a keepalive request,
+      // which also carries on after the page has closed.
+      const token = localStorage.getItem('google_id_token');
+      if (isAuthenticated && token) {
+        const unansweredQuestions = session.questions.filter(q => !session.consumedQuestionIds.has(q.id));
+        if (unansweredQuestions.length > 0) {
+          void fetch('/api/session/save-on-exit', {
+            method: 'POST',
+            keepalive: true,
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ unansweredQuestions }),
+          }).catch(() => {});
         }
       }
     };

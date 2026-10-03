@@ -51,7 +51,10 @@ let evaluateCalls = 0;
 let evaluateArgs = [];
 let questionCalls = [];
 stub('geminiService.js', {
-  generateQuestionsForSkill: async (...args) => { questionCalls.push(args); return [{ text: 'fresh question', level: args[1], skillId: args[3] }]; },
+  generateQuestionsForSkill: async (...args) => {
+    questionCalls.push(args);
+    return Array.from({ length: args[2] }, (_, i) => ({ text: i === 0 ? 'fresh question' : `fresh question ${i + 1}`, level: args[1], skillId: args[3] }));
+  },
   evaluateAnswer: async (...args) => {
     evaluateCalls += 1;
     evaluateArgs.push(args);
@@ -691,4 +694,61 @@ test('questions bought the old way (a negative used count) are kept as bonus que
   // and a normal week with used questions loses nothing
   await pool.query("UPDATE users SET questions_used = 20, last_reset_date = '2000-01-03T00:00:00.000Z' WHERE id = $1", [user]);
   assert.equal((await (await call('GET', '/api/quota', { token: user })).json()).bonusQuestions, 10);
+});
+
+test('generating questions is limited to what has been answered, so the tool cannot be used as a free question source', async () => {
+  process.env.OPEN_QUESTIONS_LIMIT = '10';
+  try {
+    const user = 'scraper@example.test';
+    const ask = (count, skill = 'java', who = user) =>
+      call('GET', `/api/questions?skillName=Java&level=Mid-level&skillId=${skill}&count=${count}`, { token: who });
+    const texts = async (res) => (await res.json()).questions.map((q) => q.text);
+
+    assert.equal((await texts(await ask(6))).length, 6);
+    assert.equal((await texts(await ask(6))).length, 4); // only 4 more may be open at once
+    const blocked = await ask(5);
+    assert.equal(blocked.status, 403);
+    assert.equal((await blocked.json()).code, 'OPEN_QUESTIONS_LIMIT');
+
+    // other users are not affected
+    assert.equal((await ask(6, 'java', 'someone-honest@example.test')).status, 200);
+
+    // answering uses a question and frees a place for exactly one more
+    assert.equal((await grade(user, 'answered elsewhere 1')).status, 200);
+    assert.equal((await grade(user, 'answered elsewhere 2')).status, 200);
+    assert.equal((await texts(await ask(5))).length, 2);
+    assert.equal((await ask(5)).status, 403);
+
+    // a free "try again" does not free a place, and a different skill does not get a separate allowance
+    assert.equal((await grade(user, 'answered elsewhere 1', { isRetry: true })).status, 200);
+    assert.equal((await ask(5, 'python')).status, 403);
+  } finally {
+    delete process.env.OPEN_QUESTIONS_LIMIT;
+  }
+});
+
+test('open questions: saved questions are still shown first when the limit is reached, and a failed grading gives the place back', async () => {
+  process.env.OPEN_QUESTIONS_LIMIT = '3';
+  try {
+    const user = 'saver@example.test';
+    const ask = (count) => call('GET', `/api/questions?skillName=Go&level=Mid-level&skillId=go&count=${count}`, { token: user });
+    assert.equal((await (await ask(3)).json()).questions.length, 3); // all three places are now open
+    assert.equal((await ask(3)).status, 403);
+
+    // leaving a session saves the unanswered questions, and they come back even though no new ones may be made
+    const q = { skillId: 'go', level: 'Mid-level', text: 'left over for later' };
+    assert.equal((await call('POST', '/api/session/save-on-exit', { token: user, json: { unansweredQuestions: [q] } })).status, 200);
+    const again = await (await ask(3)).json();
+    assert.deepEqual(again.questions.map((x) => x.text), ['left over for later']);
+
+    // a grading that fails gives its place back, so an outage does not use up the allowance
+    geminiMode = 'fail';
+    assert.equal((await grade(user, 'outage grading')).status, 502);
+    geminiMode = 'ok';
+    assert.equal((await grade(user, 'real grading')).status, 200);
+    assert.equal((await (await ask(3)).json()).questions.length, 1); // one place freed by the one real grading
+  } finally {
+    geminiMode = 'ok';
+    delete process.env.OPEN_QUESTIONS_LIMIT;
+  }
 });

@@ -13,7 +13,7 @@ const { LIMITS, LEVELS, cleanBlock } = require('./prompts');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
-const { takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, loadQuota, remainingQuestions, chargeForGrading, quotaSnapshot, getStartOfWeek, QUOTA_EXCEEDED_BODY } = require('./quota');
+const { freshQuestionAllowance, recordGenerated, OPEN_QUESTIONS_BODY, takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, loadQuota, remainingQuestions, chargeForGrading, quotaSnapshot, getStartOfWeek, QUOTA_EXCEEDED_BODY } = require('./quota');
 const { InviteError, createInvite, listInvites, revokeInvite, redeemInvite } = require('./invites');
 const { takeGuestAllowance, refundGuestAllowance, GUEST_LIMIT_BODY, GUEST_MAX_QUESTIONS } = require('./guestLimit');
 const crypto = require('crypto');
@@ -203,6 +203,14 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
       }
 
       if (remainingCount > 0) {
+        // Only so many generated questions can be waiting unanswered at once. Questions saved from before are
+        // served first (above), so this only limits asking for more while many are still open.
+        const allowed = await freshQuestionAllowance(req.userId);
+        if (allowed <= 0 && questionsToReturn.length === 0) return res.status(403).json(OPEN_QUESTIONS_BODY);
+        remainingCount = Math.min(remainingCount, allowed);
+      }
+
+      if (remainingCount > 0) {
         logger.info(`GET /api/questions: Generating ${remainingCount} new questions for user ${req.userId}.`);
         // Tell the model what this user has already seen for this skill so it does not repeat itself.
         // The lookup is best effort: if it fails we still generate, just without the hint.
@@ -214,6 +222,7 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
         }
         const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount, skillId, avoid);
         questionsToReturn = [...questionsToReturn, ...newQuestions];
+        await recordGenerated(req.userId, newQuestions.length);
       }
 
       await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
