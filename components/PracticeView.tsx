@@ -56,6 +56,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
           skillId: session.skill.id,
           skillName: session.skill.name,
           isIdk,
+          level: currentQuestion.level,
           delivery: isIdk ? null : delivery,
         });
 

@@ -88,11 +88,11 @@ const generateQuestionsForSkill = async (skillName, level, count, skillId, avoid
 
 
 
-const evaluateAnswer = async (questionText, userAnswer) => {
+const evaluateAnswer = async (questionText, userAnswer, options = {}) => {
   logger.debug('Evaluating answer for question:', questionText);
   try {
       // The prompt builder trims and caps the answer (LIMITS.ANSWER), so it is passed through as is.
-      const prompt = buildEvaluationPrompt(questionText, userAnswer);
+      const prompt = buildEvaluationPrompt(questionText, userAnswer, options);
 
       const response = await ai.models.generateContent({
           model: model,
