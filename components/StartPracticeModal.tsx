@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import type { Skill, ExperienceLevel } from '../types';
 import { XIcon, SpinnerIcon } from './Icons';
+import { RATING_CEILING, isAtCeiling } from '../utils/rating';
 
 interface StartPracticeModalProps {
   skill: Skill;
@@ -70,6 +71,16 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
                   </button>
                 ))}
               </div>
+              <p className="mt-2 text-xs text-text-muted">
+                {level === 'Expert'
+                  ? 'Expert questions can take your expertise all the way to 100%.'
+                  : `${level} questions can raise your expertise up to ${RATING_CEILING[level]}%. Harder levels move it further.`}
+              </p>
+              {isAtCeiling(skill.rating, level) && (
+                <p role="status" className="mt-2 text-sm text-yellow-300 bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-2">
+                  Your {skill.name} expertise is {skill.rating}%, the most {level} questions can reach. Choose a harder level to keep growing.
+                </p>
+              )}
             </div>
             
             <div>
