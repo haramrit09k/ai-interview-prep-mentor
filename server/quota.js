@@ -48,8 +48,12 @@ async function loadQuota(userId) {
   if (startOfCurrentWeek.getTime() > getStartOfWeek(lastResetDate).getTime()) {
     logger.info(`Quota: new week detected. Resetting weekly quota for user ${userId}.`);
     const resetTimestamp = startOfCurrentWeek.toISOString();
-    await pool.query('UPDATE users SET questions_used = 0, last_reset_date = $1 WHERE id = $2', [resetTimestamp, userId]);
-    return { questionsUsed: 0, lastResetDate: resetTimestamp, bonusQuestions: user.bonus_questions || 0, hasSeenWelcomeModal: user.has_seen_welcome_modal };
+    // Questions bought before bonus questions existed were credited by taking them off the week's used count,
+    // which left it below zero. Keep those as bonus questions instead of letting the reset wipe them.
+    const carried = Math.max(0, -(user.questions_used || 0));
+    const bonus = (user.bonus_questions || 0) + carried;
+    await pool.query('UPDATE users SET questions_used = 0, bonus_questions = $1, last_reset_date = $2 WHERE id = $3', [bonus, resetTimestamp, userId]);
+    return { questionsUsed: 0, lastResetDate: resetTimestamp, bonusQuestions: bonus, hasSeenWelcomeModal: user.has_seen_welcome_modal };
   }
   return { questionsUsed: user.questions_used, lastResetDate: user.last_reset_date, bonusQuestions: user.bonus_questions || 0, hasSeenWelcomeModal: user.has_seen_welcome_modal };
 }
@@ -89,9 +93,9 @@ const readAttempts = async (key) => {
     return 0;
   }
 };
-const writeAttempts = async (key, count) => {
+const writeAttempts = async (key, count, ttl = DAY_SECONDS) => {
   try {
-    await redisClient.set(key, String(Math.max(0, count)), { EX: DAY_SECONDS });
+    await redisClient.set(key, String(Math.max(0, count)), { EX: ttl });
   } catch (err) {
     logger.error('Quota: could not save grading count:', err.message);
   }
@@ -132,10 +136,38 @@ async function chargeForGrading(userId, questionText) {
   };
 }
 
+const VOICE_LIMIT_BODY = {
+  error: 'You have reached today\'s limit for voice answers. You can type your answer instead, and voice is available again tomorrow.',
+  code: 'VOICE_LIMIT',
+};
+
+// Voice answers are graded (and charged) like any other, so a recording is not charged a second time.
+// It is still the most expensive request we accept, so each user gets a daily number of them.
+const dailyKey = (kind, userId) => `daily:${kind}:${userId}:${new Date().toISOString().slice(0, 10)}`;
+const dailyLimit = (name, fallback) => {
+  const n = parseInt(process.env[name], 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+/** Uses up one of a user's daily voice recordings. Returns false when they have none left today. */
+async function takeDailyVoice(userId) {
+  const key = dailyKey('voice', userId);
+  const used = await readAttempts(key);
+  if (used >= dailyLimit('VOICE_DAILY_LIMIT', 60)) return false;
+  await writeAttempts(key, used + 1, 2 * DAY_SECONDS);
+  return true;
+}
+
+/** Gives a recording back after transcription failed. */
+async function refundDailyVoice(userId) {
+  const key = dailyKey('voice', userId);
+  await writeAttempts(key, (await readAttempts(key)) - 1, 2 * DAY_SECONDS);
+}
+
 /** The numbers the app needs to stay in step with the server. */
 async function quotaSnapshot(userId) {
   const quota = await loadQuota(userId);
   return { questionsUsed: quota.questionsUsed, bonusQuestions: quota.bonusQuestions };
 }
 
-module.exports = { getStartOfWeek, loadQuota, remainingQuestions, spendQuestion, refundQuestion, chargeForGrading, quotaSnapshot, QUOTA_EXCEEDED_BODY, weeklyLimit };
+module.exports = { takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, getStartOfWeek, loadQuota, remainingQuestions, spendQuestion, refundQuestion, chargeForGrading, quotaSnapshot, QUOTA_EXCEEDED_BODY, weeklyLimit };

@@ -13,7 +13,7 @@ const { LIMITS, LEVELS, cleanBlock } = require('./prompts');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
-const { loadQuota, remainingQuestions, chargeForGrading, quotaSnapshot, getStartOfWeek, QUOTA_EXCEEDED_BODY } = require('./quota');
+const { takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, loadQuota, remainingQuestions, chargeForGrading, quotaSnapshot, getStartOfWeek, QUOTA_EXCEEDED_BODY } = require('./quota');
 const { InviteError, createInvite, listInvites, revokeInvite, redeemInvite } = require('./invites');
 const { takeGuestAllowance, refundGuestAllowance, GUEST_LIMIT_BODY, GUEST_MAX_QUESTIONS } = require('./guestLimit');
 const crypto = require('crypto');
@@ -350,6 +350,16 @@ app.post('/api/transcribe', authMiddleware, rateLimiter, express.raw({ type: 'au
     return res.status(400).json({ error: 'Missing recording length.' });
   }
 
+  // Someone with no questions left cannot get the answer graded, so there is no point transcribing it. And each
+  // user gets a daily number of recordings, since audio is the most expensive thing we send to the model.
+  try {
+    if (remainingQuestions(await loadQuota(req.userId)) <= 0) return res.status(403).json(QUOTA_EXCEEDED_BODY);
+    if (!(await takeDailyVoice(req.userId))) return res.status(429).json(VOICE_LIMIT_BODY);
+  } catch (err) {
+    logger.error(`POST /api/transcribe: could not check the limits for user ${req.userId}:`, err.message);
+    return res.status(500).json({ error: 'Server Error' });
+  }
+
   try {
     const transcript = await transcribeAudio(req.body, mimeType);
     if (!transcript) {
@@ -357,6 +367,7 @@ app.post('/api/transcribe', authMiddleware, rateLimiter, express.raw({ type: 'au
     }
     res.json({ transcript, delivery: analyzeDelivery(transcript, durationMs) });
   } catch (error) {
+    await refundDailyVoice(req.userId).catch(() => {});
     logger.error('Error in /api/transcribe:', error);
     res.status(502).json({ error: 'Transcription is unavailable right now. You can type your answer instead.' });
   }
@@ -547,8 +558,10 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
       if (userId && !isNaN(questionsToGrant)) {
         try {
-          // Add questions to the user's quota
-          await pool.query('UPDATE users SET questions_used = questions_used - $1 WHERE id = $2', [questionsToGrant, userId]);
+          // Bought questions are bonus questions: the weekly reset does not touch them, and they are spent after
+          // the weekly ones. (They used to be taken off the week's used count, which the reset wiped.)
+          await loadQuota(userId); // makes sure the user's row exists
+          await pool.query('UPDATE users SET bonus_questions = COALESCE(bonus_questions, 0) + $1 WHERE id = $2', [questionsToGrant, userId]);
           logger.info(`Granted ${questionsToGrant} questions to user ${userId}.`);
         } catch (dbErr) {
           logger.error(`Database error granting questions to ${userId}:`, dbErr.message);

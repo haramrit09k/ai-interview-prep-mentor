@@ -58,7 +58,10 @@ stub('geminiService.js', {
     if (geminiMode === 'fail') throw new Error('upstream down');
     return { mentorAnswer: 'm', feedback: 'f', classification: 'correct', conceptsKnown: ['scope'], conceptsToReview: ['hoisting'] };
   },
-  transcribeAudio: async () => (geminiMode === 'silent' ? '' : 'um a closure is basically a function that remembers its scope'),
+  transcribeAudio: async () => {
+    if (geminiMode === 'fail') throw new Error('upstream down');
+    return geminiMode === 'silent' ? '' : 'um a closure is basically a function that remembers its scope';
+  },
 });
 
 const app = require('../server/index.js');
@@ -613,4 +616,79 @@ test('deleting a skill removes its history, so it is not brought back, and leave
   const pool = require('../server/db');
   const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [user]);
   assert.deepEqual(Object.keys(JSON.parse(rows[0].unanswered_questions)), ['keep-id']);
+});
+
+const record = (token, extra = {}) =>
+  call('POST', '/api/transcribe', { token, body: audio(), headers: { 'Content-Type': 'audio/webm', 'X-Audio-Duration-Ms': '30000', ...extra } });
+
+test('voice: needs a question left, is limited per day, and an AI failure gives the recording back', async () => {
+  process.env.VOICE_DAILY_LIMIT = '2';
+  process.env.WEEKLY_QUESTION_LIMIT = '1';
+  try {
+    const user = 'speaker@example.test';
+    assert.equal((await record(user)).status, 200);
+    assert.equal((await record(user)).status, 200);
+    const tooMany = await record(user);
+    assert.equal(tooMany.status, 429);
+    assert.equal((await tooMany.json()).code, 'VOICE_LIMIT');
+    assert.equal((await record('other-speaker@example.test')).status, 200); // another user is unaffected
+
+    // a failed transcription does not use up a recording
+    geminiMode = 'fail';
+    assert.equal((await record('unlucky-speaker@example.test')).status, 502);
+    assert.equal((await record('unlucky-speaker@example.test')).status, 502);
+    geminiMode = 'ok';
+    assert.equal((await record('unlucky-speaker@example.test')).status, 200);
+    assert.equal((await record('unlucky-speaker@example.test')).status, 200);
+    assert.equal((await record('unlucky-speaker@example.test')).status, 429);
+
+    // no questions left: nothing is transcribed, because the answer could not be graded anyway
+    const broke = 'broke-speaker@example.test';
+    assert.equal((await grade(broke, 'voice q')).status, 200); // spends the only weekly question
+    const refused = await record(broke);
+    assert.equal(refused.status, 403);
+    assert.equal((await refused.json()).code, 'QUOTA_EXCEEDED');
+  } finally {
+    geminiMode = 'ok';
+    delete process.env.VOICE_DAILY_LIMIT;
+    delete process.env.WEEKLY_QUESTION_LIMIT;
+  }
+});
+
+test('bought questions are bonus questions, so the weekly reset keeps them', async () => {
+  const Stripe = require('stripe');
+  process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_secret';
+  const user = 'buyer@example.test';
+  await call('GET', '/api/quota', { token: user });
+  const payload = JSON.stringify({
+    id: 'evt_test', object: 'event', type: 'checkout.session.completed',
+    data: { object: { id: 'cs_test', object: 'checkout.session', metadata: { userId: user, questionsToGrant: '10' } } },
+  });
+  const signature = Stripe.webhooks.generateTestHeaderString({ payload, secret: process.env.STRIPE_WEBHOOK_SECRET });
+  const res = await call('POST', '/webhook', { body: payload, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': signature } });
+  assert.equal(res.status, 200);
+  assert.equal((await (await call('GET', '/api/quota', { token: user })).json()).bonusQuestions, 10);
+  // a request that is not signed by Stripe credits nothing
+  assert.equal((await call('POST', '/webhook', { body: payload, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': 't=1,v1=bad' } })).status, 400);
+  assert.equal((await (await call('GET', '/api/quota', { token: user })).json()).bonusQuestions, 10);
+
+  // the weekly reset keeps them
+  const pool = require('../server/db');
+  await pool.query("UPDATE users SET questions_used = 30, last_reset_date = '2000-01-03T00:00:00.000Z' WHERE id = $1", [user]);
+  const afterReset = await (await call('GET', '/api/quota', { token: user })).json();
+  assert.equal(afterReset.questionsUsed, 0);
+  assert.equal(afterReset.bonusQuestions, 10);
+});
+
+test('questions bought the old way (a negative used count) are kept as bonus questions at the reset', async () => {
+  const pool = require('../server/db');
+  const user = 'old-buyer@example.test';
+  await call('GET', '/api/quota', { token: user });
+  await pool.query("UPDATE users SET questions_used = -7, bonus_questions = 3, last_reset_date = '2000-01-03T00:00:00.000Z' WHERE id = $1", [user]);
+  const quota = await (await call('GET', '/api/quota', { token: user })).json();
+  assert.equal(quota.questionsUsed, 0);
+  assert.equal(quota.bonusQuestions, 10); // 7 bought and unused, plus the 3 already there
+  // and a normal week with used questions loses nothing
+  await pool.query("UPDATE users SET questions_used = 20, last_reset_date = '2000-01-03T00:00:00.000Z' WHERE id = $1", [user]);
+  assert.equal((await (await call('GET', '/api/quota', { token: user })).json()).bonusQuestions, 10);
 });
