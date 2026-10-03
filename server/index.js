@@ -12,14 +12,20 @@ const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
 const crypto = require('crypto');
 
+// Authoritative price list. Keep in sync with config/purchaseOptions.ts.
+// The client only chooses a quantity; the price is always looked up here.
+const PURCHASE_OPTIONS = { 10: 199, 50: 499, 100: 799 };
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Initialize Stripe with your secret key
-console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY);
 const logger = require('./logger');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Behind Heroku's router, req.ip is the router unless we trust the first proxy hop
+app.set('trust proxy', 1);
 
 // Middleware
 // For production, configure CORS to only allow your frontend domain
@@ -101,7 +107,7 @@ app.get('/api/quota', authMiddleware, async (req, res) => {
     }
   } catch (err) {
     logger.error(`GET /api/quota: Error for user ${req.userId}:`, err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: 'Server Error' });
   }
 });
 
@@ -110,10 +116,10 @@ app.post('/api/quota/increment', express.json(), authMiddleware, async (req, res
   try {
     await pool.query('UPDATE users SET questions_used = questions_used + 1 WHERE id = $1', [req.userId]);
     logger.info(`POST /api/quota/increment: Quota incremented for user ${req.userId}.`);
-    res.status(200).send('Quota updated');
+    res.status(200).json({ error: 'Quota updated' });
   } catch (err) {
     logger.error(`POST /api/quota/increment: Error for user ${req.userId}:`, err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: 'Server Error' });
   }
 });
 
@@ -122,10 +128,10 @@ app.post('/api/user/seen-welcome-modal', express.json(), authMiddleware, async (
   try {
     await pool.query('UPDATE users SET has_seen_welcome_modal = TRUE WHERE id = $1', [req.userId]);
     logger.info(`POST /api/user/seen-welcome-modal: Welcome modal status updated for user ${req.userId}.`);
-    res.status(200).send('Welcome modal status updated');
+    res.status(200).json({ error: 'Welcome modal status updated' });
   } catch (err) {
     logger.error(`POST /api/user/seen-welcome-modal: Error for user ${req.userId}:`, err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: 'Server Error' });
   }
 });
 
@@ -136,7 +142,7 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
 
   if (!skillName || !level || !skillId || isNaN(requestedCount) || requestedCount <= 0) {
     logger.warn(`GET /api/questions: Invalid request parameters for user ${req.userId}.`);
-    return res.status(400).send('Missing or invalid parameters: skillName, level, count, skillId');
+    return res.status(400).json({ error: 'Missing or invalid parameters: skillName, level, count, skillId' });
   }
 
   if (req.userId) {
@@ -180,7 +186,7 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
 
     } catch (err) {
       logger.error(`GET /api/questions: Error for user ${req.userId}:`, err.message);
-      res.status(500).send('Server Error');
+      res.status(500).json({ error: 'Server Error' });
     }
   } else {
     // Guest user logic
@@ -190,7 +196,7 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
       res.json({ questions: newQuestions });
     } catch (err) {
       logger.error(`GET /api/questions: Error for guest user:`, err.message);
-      res.status(500).send('Server Error');
+      res.status(500).json({ error: 'Server Error' });
     }
   }
 });
@@ -200,7 +206,7 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
   const { questionText, userAnswer } = req.body;
 
   if (!questionText || userAnswer === undefined) {
-    return res.status(400).send('Missing questionText or userAnswer');
+    return res.status(400).json({ error: 'Missing questionText or userAnswer' });
   }
 
   try {
@@ -224,7 +230,7 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
     res.json(evaluation);
   } catch (error) {
     logger.error('Error in /api/evaluate:', error);
-    res.status(500).send('Error evaluating answer');
+    res.status(500).json({ error: 'Error evaluating answer' });
   }
 });
 
@@ -233,7 +239,7 @@ app.post('/api/questions/save-unanswered', express.json(), authMiddleware, async
   const { unansweredQuestions } = req.body; // Expects an array of question objects with skillId and level
 
   if (!unansweredQuestions || !Array.isArray(unansweredQuestions) || unansweredQuestions.length === 0) {
-    return res.status(400).send('Invalid or empty unansweredQuestions array');
+    return res.status(400).json({ error: 'Invalid or empty unansweredQuestions array' });
   }
 
   try {
@@ -265,10 +271,10 @@ app.post('/api/questions/save-unanswered', express.json(), authMiddleware, async
 
     await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
     logger.info(`POST /api/questions/save-unanswered: Saved unanswered questions for user ${req.userId}.`);
-    res.status(200).send('Unanswered questions saved');
+    res.status(200).json({ error: 'Unanswered questions saved' });
   } catch (err) {
     logger.error(`POST /api/questions/save-unanswered: Error for user ${req.userId}:`, err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: 'Server Error' });
   }
 });
 
@@ -278,7 +284,7 @@ app.post('/api/revision-summary', express.json(), authMiddleware, async (req, re
 
   if (!skillId || !skillName || !Array.isArray(knownQuestions) || !Array.isArray(unknownQuestions)) {
     logger.warn(`POST /api/revision-summary: Invalid request parameters for user ${req.userId}.`)
-    return res.status(400).send('Missing skillId, skillName, knownQuestions, or unknownQuestions');
+    return res.status(400).json({ error: 'Missing skillId, skillName, knownQuestions, or unknownQuestions' });
   }
 
   try {
@@ -296,10 +302,10 @@ app.post('/api/revision-summary', express.json(), authMiddleware, async (req, re
 
     await pool.query('UPDATE users SET revision_summaries = $1 WHERE id = $2', [JSON.stringify(summaries), req.userId]);
     logger.info(`POST /api/revision-summary: Saved summary for skill ${skillId} for user ${req.userId}.`);
-    res.status(200).send('Revision summary saved');
+    res.status(200).json({ error: 'Revision summary saved' });
   } catch (err) {
     logger.error(`POST /api/revision-summary: Error for user ${req.userId}:`, err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: 'Server Error' });
   }
 });
 
@@ -319,20 +325,19 @@ app.get('/api/revision-summary/:skillId', authMiddleware, async (req, res) => {
       res.json(summaries[skillId]);
     } else {
       logger.info(`GET /api/revision-summary/:skillId: No summary found for skill ${skillId} for user ${req.userId}.`);
-      res.status(404).send('Revision summary not found');
+      res.status(404).json({ error: 'Revision summary not found' });
     }
   } catch (err) {
     logger.error(`GET /api/revision-summary/:skillId: Error for user ${req.userId}:`, err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: 'Server Error' });
   }
 });
 
 // New endpoint to create a Stripe Checkout Session
 app.post('/api/create-checkout-session', express.json(), authMiddleware, async (req, res) => {
   logger.debug(`POST /api/create-checkout-session: User ID: ${req.userId}`);
-  const { quantity, priceCents } = req.body; // Assuming frontend sends the quantity of questions to buy and price in cents
-
-  const unit_amount = priceCents;
+  const quantity = parseInt(req.body.quantity, 10);
+  const unit_amount = PURCHASE_OPTIONS[quantity];
 
   if (unit_amount === undefined) {
     return res.status(400).json({ error: 'Invalid quantity selected.' });
@@ -361,7 +366,7 @@ app.post('/api/create-checkout-session', express.json(), authMiddleware, async (
     res.json({ url: session.url });
   } catch (e) {
     logger.error('Error creating checkout session:', e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: 'Could not start checkout. Please try again.' });
   }
 });
 
@@ -376,7 +381,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   } catch (err) {
     logger.error(`Webhook Error: ${err.message}`);
     logger.error(err); // Log the full error object
-    return res.status(400).send(`Webhook Error: ${err.message}`);
+    return res.status(400).json({ error: `Webhook Error: ${err.message}` });
   }
 
   // Handle the event
@@ -395,7 +400,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           logger.info(`Granted ${questionsToGrant} questions to user ${userId}.`);
         } catch (dbErr) {
           logger.error(`Database error granting questions to ${userId}:`, dbErr.message);
-          return res.status(500).send('Database update failed');
+          return res.status(500).json({ error: 'Database update failed' });
         }
       }
       break;
@@ -413,8 +418,8 @@ app.post('/api/session/save-on-exit', express.json(), authMiddleware, async (req
     logger.debug(`POST /api/session/save-on-exit: User ID: ${req.userId}`);
     const { unansweredQuestions, summaryData } = req.body;
 
-    if (!summaryData || !summaryData.skillId) {
-        return res.status(400).send('Missing summary data.');
+    if (!summaryData || !summaryData.skillId || !Array.isArray(summaryData.history)) {
+        return res.status(400).json({ error: 'Missing summary data.' });
     }
 
     try {
@@ -454,12 +459,12 @@ app.post('/api/session/save-on-exit', express.json(), authMiddleware, async (req
         }
 
         await pool.query('COMMIT');
-        res.status(200).send('Session data saved successfully.');
+        res.status(200).json({ error: 'Session data saved successfully.' });
 
     } catch (err) {
         await pool.query('ROLLBACK');
         logger.error(`Error in /api/session/save-on-exit for user ${req.userId}:`, err.message);
-        res.status(500).send('Server Error');
+        res.status(500).json({ error: 'Server Error' });
     }
 });
 
@@ -484,7 +489,14 @@ app.post('/api/log', express.json(), (req, res) => {
   } else {
     logger.info(`[FRONTEND] ${message}`, context); // Default to info if level is unknown
   }
-  res.status(200).send('Log received');
+  res.status(200).json({ error: 'Log received' });
+});
+
+// Last-resort error handler: always answer with JSON, never an HTML/plain-text stack page
+app.use((err, req, res, next) => {
+  logger.error(`Unhandled error on ${req.method} ${req.originalUrl}:`, err.message);
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json({ error: err.status && err.status < 500 ? err.message : 'Server Error' });
 });
 
 app.listen(PORT, () => {
