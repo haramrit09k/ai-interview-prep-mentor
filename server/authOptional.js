@@ -24,7 +24,9 @@ async function authOptionalMiddleware(req, res, next) {
         audience: process.env.GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
-    req.userId = payload['sub']; // 'sub' is the user's unique Google ID
+    req.userId = payload['sub'];
+    // Only a verified address can be trusted, for example to match an invite code.
+    req.userEmail = payload['email_verified'] && payload['email'] ? String(payload['email']).toLowerCase() : null; // 'sub' is the user's unique Google ID
     logger.debug(`authOptionalMiddleware: Token verified. User ID: ${req.userId}`);
   } catch (error) {
     logger.warn('authOptionalMiddleware: Error verifying token, proceeding as guest.', error);

@@ -20,6 +20,8 @@ import { jwtDecode } from 'jwt-decode';
 import logger from './src/logger'; // Import the logger
 import { readErrorMessage, isGuestLimitBody } from './services/gemini';
 import ProgressModal from './components/ProgressModal';
+import RedeemCodeModal from './components/RedeemCodeModal';
+import { codeFromAddress, clearCodeFromAddress } from './services/invites';
 import Footer from './components/Footer';
 import { fetchInsights } from './services/progress';
 import { GUEST_MAX_QUESTIONS, defaultQuestionCount, recommendedLevel } from './utils/practiceDefaults';
@@ -55,6 +57,7 @@ interface PracticeSession {
 interface AuthQuota {
     questionsUsed: number;
     lastResetDate: string; // YYYY-MM-DD format
+    bonusQuestions?: number; // from invite codes, spent after the weekly questions
 }
 
 const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => {
@@ -76,6 +79,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [isProgressOpen, setIsProgressOpen] = useState(false);
+  // A share link like /?code=ACE-XXXX-XXXX opens the redeem dialog with the code filled in.
+  const [redeem, setRedeem] = useState<{ isOpen: boolean; code: string }>(() => {
+    const code = codeFromAddress();
+    return { isOpen: code !== null, code: code ?? '' };
+  });
+  useEffect(() => { clearCodeFromAddress(); }, []);
   
   const [authQuota, setAuthQuota] = useState<AuthQuota>({ questionsUsed: 0, lastResetDate: new Date().toISOString().split('T')[0] });
 
@@ -126,7 +135,8 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   }, [isAuthenticated, authQuota.lastResetDate]);
   
   // --- DERIVED STATE FOR UI ---
-  const questionsRemaining = isAuthenticated ? QUESTIONS_LIMIT_AUTH - authQuota.questionsUsed : 0;
+  // The weekly questions, plus any bonus questions from invite codes.
+  const questionsRemaining = isAuthenticated ? QUESTIONS_LIMIT_AUTH - authQuota.questionsUsed + (authQuota.bonusQuestions ?? 0) : 0;
   const nextResetDate = isAuthenticated ? new Date(new Date(authQuota.lastResetDate).getTime() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString() : null;
   const sessionsRemaining = isAuthenticated ? Infinity : SESSIONS_LIMIT_ANON - anonSessionsUsed;
   const isSkillLimitReached = isAuthenticated 
@@ -413,7 +423,13 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         },
       });
       if (response.ok) {
-        setAuthQuota(prev => ({...prev, questionsUsed: prev.questionsUsed + 1}));
+        // The server decides whether a weekly or a bonus question was spent, and tells us where it landed.
+        const data = await response.json().catch(() => null);
+        if (data && typeof data.questionsUsed === 'number') {
+          setAuthQuota(prev => ({...prev, questionsUsed: data.questionsUsed, bonusQuestions: data.bonusQuestions ?? prev.bonusQuestions}));
+        } else {
+          setAuthQuota(prev => ({...prev, questionsUsed: prev.questionsUsed + 1}));
+        }
       } else if (response.status === 401) {
         handleAuthError(handleLogout, 'Failed to increment quota: Unauthorized.');
       } else {
@@ -545,6 +561,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         onPurchaseQuestions={handlePurchaseQuestions}
         onOpenWelcomeModal={() => setIsWelcomeModalOpen(true)}
         onOpenProgress={() => setIsProgressOpen(true)}
+        onOpenRedeem={() => setRedeem(prev => ({ ...prev, isOpen: true }))}
         streak={insights ? { current: insights.totals.currentStreak, practicedToday: insights.totals.practicedToday } : null}
         setShowPurchaseModal={setShowPurchaseModal}
       />
@@ -608,6 +625,18 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         />
       )}
       {isWelcomeModalOpen && <WelcomeModal onClose={() => setIsWelcomeModalOpen(false)} />}
+      {redeem.isOpen && (
+        <RedeemCodeModal
+          isAuthenticated={isAuthenticated}
+          initialCode={redeem.code}
+          signInButton={isAuthEnabled ? signInButton : null}
+          onClose={() => setRedeem({ isOpen: false, code: '' })}
+          onRedeemed={(added, bonusQuestions) => {
+            setAuthQuota(prev => ({ ...prev, bonusQuestions }));
+            setToastMessage(`${added} bonus questions added!`);
+          }}
+        />
+      )}
       {isProgressOpen && isAuthenticated && (
         <ProgressModal onClose={() => setIsProgressOpen(false)} />
       )}

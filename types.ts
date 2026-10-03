@@ -51,6 +51,7 @@ export interface Usage {
 export interface AuthQuota {
   questionsUsed: number;
   lastResetDate: string; // YYYY-MM-DD format
+  bonusQuestions?: number; // from invite codes, spent after the weekly questions
 }
 
 /** Delivery coaching for a spoken answer. Computed on the server from the transcript. */

@@ -92,7 +92,8 @@ db.query(createTableSql)
       return Promise.all([
         db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_seen_welcome_modal BOOLEAN DEFAULT FALSE;`),
         db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS unanswered_questions TEXT;`),
-        db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS revision_summaries TEXT;`)
+        db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS revision_summaries TEXT;`),
+        db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_questions INTEGER DEFAULT 0;`)
       ]);
     } else {
       // SQLite: Use PRAGMA table_info check before ALTER TABLE ADD COLUMN
@@ -127,6 +128,11 @@ db.query(createTableSql)
           } else {
             logger.info('revision_summaries column already exists.');
           }
+          // Add bonus_questions column (questions from invite codes, which the weekly reset does not touch)
+          if (!columns.some(col => col.name === 'bonus_questions')) {
+            logger.info('Adding bonus_questions column to users table.');
+            promises.push(db.query(`ALTER TABLE users ADD COLUMN bonus_questions INTEGER DEFAULT 0;`));
+          }
           return Promise.all(promises);
         });
     }
@@ -160,6 +166,19 @@ db.query(createTableSql)
   })
   .then(() => db.query('CREATE INDEX IF NOT EXISTS idx_answer_log_user_time ON answer_log (user_id, answered_at);'))
   .then(() => db.query('CREATE INDEX IF NOT EXISTS idx_answer_log_user_skill_time ON answer_log (user_id, skill_id, answered_at);'))
+  // Invite codes the admin hands out. One code, one email, one use.
+  .then(() => db.query(`
+    CREATE TABLE IF NOT EXISTS invite_codes (
+      code TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      questions INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      redeemed_by TEXT,
+      redeemed_at TEXT,
+      revoked_at TEXT
+    );
+  `))
   .then(() => logger.info('Database schema initialization complete.'))
   .catch(err => logger.error('Error initializing database schema', err));
 

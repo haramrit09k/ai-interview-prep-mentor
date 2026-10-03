@@ -15,12 +15,13 @@ interface HeaderProps {
     onPurchaseQuestions: (quantity: number, priceCents: number) => void;
     onOpenWelcomeModal: () => void;
     onOpenProgress: () => void;
+    onOpenRedeem: () => void;
     setShowPurchaseModal: (show: boolean) => void;
     nextResetDate: string | null; // New prop for next reset date
     streak: { current: number; practicedToday: boolean } | null; // null until progress has loaded
 }
 
-const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onOpenWelcomeModal, onOpenProgress, setShowPurchaseModal, nextResetDate, streak }) => {
+const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onOpenWelcomeModal, onOpenProgress, onOpenRedeem, setShowPurchaseModal, nextResetDate, streak }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
@@ -52,7 +53,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                         <BrainIcon className="h-8 w-8 text-brand-light" />
                         <h1 className="ml-3 flex items-baseline gap-2">
                             <span className="font-mono text-lg font-bold text-text-primary tracking-tight">ACE</span>
-                            <span className="hidden sm:inline text-sm text-text-muted">AI Coach for Employment</span>
+                            <span className="hidden lg:inline text-sm text-text-muted">AI Coach for Employment</span>
                         </h1>
                     </div>
                     <div className="flex items-center gap-2">
@@ -95,10 +96,16 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                             >
                                 <QuestionMarkCircleIcon className="w-6 h-6" />
                             </button>
+                            <button
+                                onClick={onOpenRedeem}
+                                className="px-3 py-2 rounded-lg text-text-secondary font-semibold whitespace-nowrap hover:bg-background-light hover:text-text-primary focus-visible:ring-2 focus-visible:ring-brand-light transition-colors"
+                            >
+                                Have a code?
+                            </button>
                             {isAuthenticated && (
                                 <button
                                     onClick={onOpenProgress}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-text-secondary font-semibold hover:bg-background-light hover:text-text-primary focus-visible:ring-2 focus-visible:ring-brand-light transition-colors"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-text-secondary font-semibold whitespace-nowrap hover:bg-background-light hover:text-text-primary focus-visible:ring-2 focus-visible:ring-brand-light transition-colors"
                                 >
                                     <ChartBarIcon className="w-5 h-5" /> Progress
                                 </button>
@@ -106,7 +113,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                             {isAuthenticated && (
                                 <button
                                     onClick={() => setShowPurchaseModal(true)}
-                                    className="px-4 py-2 bg-brand-primary text-white font-semibold rounded-lg hover:bg-brand-hover transition-colors"
+                                    className="px-4 py-2 bg-brand-primary text-white font-semibold whitespace-nowrap rounded-lg hover:bg-brand-hover transition-colors"
                                 >
                                     Buy Questions
                                 </button>
@@ -114,7 +121,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                             {isAuthEnabled ? (
                                 userProfile ? (
                                     <div className="flex items-center gap-2">
-                                        <span className="text-text-secondary text-sm">
+                                        <span className="hidden lg:inline text-text-secondary text-sm">
                                             Welcome, {userProfile.name.split(' ')[0]}!
                                         </span>
                                         <div className="relative group">
@@ -216,6 +223,12 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                                     Buy Questions
                                 </button>
                             )}
+                            <button
+                                onClick={() => { onOpenRedeem(); setIsMobileMenuOpen(false); }}
+                                className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors text-sm w-full max-w-xs"
+                            >
+                                Have a code?
+                            </button>
                             <button
                                 onClick={() => { onOpenWelcomeModal(); setIsMobileMenuOpen(false); }}
                                 className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors text-sm w-full max-w-xs"

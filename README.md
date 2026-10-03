@@ -22,6 +22,7 @@ I built it to learn how the pieces of a small paid web product fit together: log
 - A Review button on every skill opens a study sheet built from your whole history: the questions worth another try (with a one-click "practise these" session), concepts you keep missing, concepts you have mastered, and how that skill is trending
 - Works as a guest (2 skills, 2 sessions of 5 questions each); signing in with Google unlocks 5 skills and 50 questions a week
 - Sells extra question packs through Stripe Checkout
+- Invite codes: the admin makes a code for a friend's email, and the friend enters it (or opens the share link) after signing in with that email to get bonus questions. See Invite codes below
 
 ## How it works
 
@@ -202,3 +203,24 @@ More of the reasoning behind early decisions is in [`LESSONS.md`](LESSONS.md).
 ## License
 
 ISC, see [`LICENSE`](LICENSE).
+
+## Invite codes
+
+You can give a friend some extra practice questions. A code is made for one email address, can be used once, and only works for the Google account with that email.
+
+```
+export ADMIN_API_KEY=...   # the same value as on the server, at least 24 characters
+export APP_URL=https://ace-interview.app
+node scripts/invite.js create friend@example.com 10 14   # email, questions (default 10), days valid (default 14)
+node scripts/invite.js list
+node scripts/invite.js revoke ACE-ABCD-EFGH
+```
+
+`create` prints the code, a share link (`/?code=...` opens the redeem dialog with the code filled in) and a short message you can paste. The friend signs in with Google using that email and presses Redeem, or opens the link.
+
+How the cost stays small and bounded:
+- A code has a maximum size (`INVITE_MAX_QUESTIONS_PER_CODE`, default 25) and the total you can hand out is capped (`INVITE_TOTAL_QUESTION_BUDGET`, default 100). Creating a code over the budget is refused. Codes that expire unused, or that you revoke, give their questions back to the budget.
+- Codes expire after 14 days (at most 60). A used code cannot be revoked, because its questions are already given.
+- Bonus questions are kept apart from the weekly 50, so the Monday reset does not wipe them. The weekly questions are used first, then the bonus ones.
+- The admin routes (`/api/admin/invites`) do not exist unless `ADMIN_API_KEY` is set to a long value, and then they need it as a Bearer token.
+- A wrong code, someone else's code and a made up code all give the same message, so codes cannot be probed. Gmail dots and +tags are ignored when matching emails.

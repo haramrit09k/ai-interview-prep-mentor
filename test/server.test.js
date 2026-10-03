@@ -28,13 +28,14 @@ stub('auth.js', {
     const id = userFrom(req);
     if (!id) return res.status(401).json({ error: 'Invalid token' });
     req.userId = id;
+    req.userEmail = id.includes('@') ? id : `${id}@example.test`; // like a verified Google address
     next();
   },
 });
 stub('authOptional.js', {
   authOptionalMiddleware: (req, res, next) => {
     const id = userFrom(req);
-    if (id) req.userId = id;
+    if (id) { req.userId = id; req.userEmail = id.includes('@') ? id : `${id}@example.test`; }
     next();
   },
 });
@@ -314,7 +315,9 @@ test('save on exit: stores unanswered questions, tolerates old clients, and neve
 test('success responses are not labelled as errors', async () => {
   const res = await call('POST', '/api/quota/increment', { token: 'quitter', json: {} });
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ok: true });
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.bonusQuestions, 0);
 });
 
 test('guests get a limited number of rounds and graded answers per network, and signed in users are not counted', async () => {
@@ -356,4 +359,111 @@ test('guests get a limited number of rounds and graded answers per network, and 
     process.env.GUEST_EVALUATIONS_LIMIT = '1000';
     clearGuestKeys();
   }
+});
+
+const ADMIN_KEY = 'a-test-admin-key-that-is-long-enough';
+const admin = (method, url, json) => call(method, url, { json, headers: { Authorization: `Bearer ${ADMIN_KEY}` } });
+
+test('admin routes do not exist without a long enough key, and need the right key', async () => {
+  delete process.env.ADMIN_API_KEY;
+  assert.equal((await admin('GET', '/api/admin/invites')).status, 404);
+  process.env.ADMIN_API_KEY = 'too-short';
+  assert.equal((await admin('GET', '/api/admin/invites')).status, 404);
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  assert.equal((await call('GET', '/api/admin/invites')).status, 401);
+  assert.equal((await call('GET', '/api/admin/invites', { headers: { Authorization: 'Bearer wrong' } })).status, 401);
+  assert.equal((await admin('GET', '/api/admin/invites')).status, 200);
+});
+
+test('invite codes: made for an email, used once, only by that email, and added on top of the weekly questions', async () => {
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  process.env.INVITE_TOTAL_QUESTION_BUDGET = '1000';
+  const made = await admin('POST', '/api/admin/invites', { email: 'Friend@Example.test', questions: 7 });
+  assert.equal(made.status, 201);
+  const invite = await made.json();
+  assert.match(invite.code, /^ACE-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  assert.equal(invite.email, 'friend@example.test');
+  assert.equal(invite.questions, 7);
+
+  // a stranger, a guest and a mistyped code all get the same refusal
+  const strangerRes = await call('POST', '/api/invites/redeem', { token: 'stranger@example.test', json: { code: invite.code } });
+  assert.equal(strangerRes.status, 400);
+  const strangerMsg = (await strangerRes.json()).error;
+  const unknown = await call('POST', '/api/invites/redeem', { token: 'friend@example.test', json: { code: 'ACE-AAAA-AAAA' } });
+  assert.equal(unknown.status, 400);
+  assert.equal((await unknown.json()).error, strangerMsg);
+  assert.equal((await call('POST', '/api/invites/redeem', { json: { code: invite.code } })).status, 401);
+
+  // the right account, typed loosely, gets the questions
+  await call('GET', '/api/quota', { token: 'friend@example.test' });
+  const redeemed = await call('POST', '/api/invites/redeem', { token: 'friend@example.test', json: { code: invite.code.toLowerCase().replace(/-/g, ' ') } });
+  assert.equal(redeemed.status, 200);
+  assert.deepEqual(await redeemed.json(), { questionsAdded: 7, bonusQuestions: 7 });
+  const quota = await (await call('GET', '/api/quota', { token: 'friend@example.test' })).json();
+  assert.equal(quota.bonusQuestions, 7);
+
+  // a code works once
+  const again = await call('POST', '/api/invites/redeem', { token: 'friend@example.test', json: { code: invite.code } });
+  assert.equal(again.status, 409);
+  const listed = await (await admin('GET', '/api/admin/invites')).json();
+  assert.equal(listed.invites.find((i) => i.code === invite.code).status, 'redeemed');
+});
+
+test('invite codes: the weekly questions are spent before bonus ones', async () => {
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  const user = 'spender@example.test';
+  const invite = await (await admin('POST', '/api/admin/invites', { email: user, questions: 2 })).json();
+  await call('GET', '/api/quota', { token: user });
+  await call('POST', '/api/invites/redeem', { token: user, json: { code: invite.code } });
+  // use up the whole weekly allowance (50), as the app would
+  let last;
+  for (let i = 0; i < 50; i += 1) last = await (await call('POST', '/api/quota/increment', { token: user, json: {} })).json();
+  assert.deepEqual([last.questionsUsed, last.bonusQuestions], [50, 2]);
+  // from now on the bonus questions are used
+  last = await (await call('POST', '/api/quota/increment', { token: user, json: {} })).json();
+  assert.deepEqual([last.questionsUsed, last.bonusQuestions], [50, 1]);
+});
+
+test('invite codes: caps keep the spending bounded, and expired or revoked codes cannot be used', async () => {
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  // one code cannot be bigger than the per code cap, and bad input is refused
+  process.env.INVITE_MAX_QUESTIONS_PER_CODE = '10';
+  assert.equal((await admin('POST', '/api/admin/invites', { email: 'big@example.test', questions: 11 })).status, 400);
+  assert.equal((await admin('POST', '/api/admin/invites', { email: 'not-an-email' })).status, 400);
+  assert.equal((await admin('POST', '/api/admin/invites', { email: 'x@example.test', questions: 0 })).status, 400);
+  assert.equal((await admin('POST', '/api/admin/invites', { email: 'x@example.test', days: 500 })).status, 400);
+  delete process.env.INVITE_MAX_QUESTIONS_PER_CODE;
+
+  // the total is capped too, and revoking an unused code gives its questions back
+  const before = (await (await admin('GET', '/api/admin/invites')).json()).budget;
+  process.env.INVITE_TOTAL_QUESTION_BUDGET = String(before.committed + 10);
+  const a = await (await admin('POST', '/api/admin/invites', { email: 'a@example.test', questions: 10 })).json();
+  const over = await admin('POST', '/api/admin/invites', { email: 'b@example.test', questions: 1 });
+  assert.equal(over.status, 409);
+  assert.match((await over.json()).error, /budget/);
+  const revoked = await admin('DELETE', `/api/admin/invites/${a.code}`);
+  assert.equal(revoked.status, 200);
+  assert.equal((await revoked.json()).budget.remaining, 10);
+  assert.equal((await admin('POST', '/api/admin/invites', { email: 'b@example.test', questions: 1 })).status, 201);
+  process.env.INVITE_TOTAL_QUESTION_BUDGET = '1000';
+
+  // a revoked code cannot be used
+  const gone = await call('POST', '/api/invites/redeem', { token: 'a@example.test', json: { code: a.code } });
+  assert.equal(gone.status, 410);
+
+  // an expired code cannot be used, and its questions are not counted against the budget
+  const pool = require('../server/db');
+  const expired = await (await admin('POST', '/api/admin/invites', { email: 'late@example.test', questions: 5 })).json();
+  await pool.query('UPDATE invite_codes SET expires_at = $1 WHERE code = $2', ['2000-01-01T00:00:00.000Z', expired.code]);
+  const late = await call('POST', '/api/invites/redeem', { token: 'late@example.test', json: { code: expired.code } });
+  assert.equal(late.status, 410);
+  const list = await (await admin('GET', '/api/admin/invites')).json();
+  assert.equal(list.invites.find((i) => i.code === expired.code).status, 'expired');
+});
+
+test('invite codes: Gmail dots and plus tags count as the same address', async () => {
+  process.env.ADMIN_API_KEY = ADMIN_KEY;
+  const invite = await (await admin('POST', '/api/admin/invites', { email: 'sam.smith@gmail.com', questions: 3 })).json();
+  const res = await call('POST', '/api/invites/redeem', { token: 'samsmith+ace@gmail.com', json: { code: invite.code } });
+  assert.equal(res.status, 200);
 });

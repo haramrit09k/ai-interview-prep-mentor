@@ -13,6 +13,7 @@ const { LIMITS, LEVELS, cleanBlock } = require('./prompts');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
+const { InviteError, createInvite, listInvites, revokeInvite, redeemInvite } = require('./invites');
 const { takeGuestAllowance, refundGuestAllowance, GUEST_LIMIT_BODY, GUEST_MAX_QUESTIONS } = require('./guestLimit');
 const crypto = require('crypto');
 
@@ -66,11 +67,14 @@ const getStartOfWeek = (date) => {
   return d;
 };
 
+// Questions a signed in user gets each week. Keep in sync with QUESTIONS_LIMIT_AUTH in App.tsx.
+const WEEKLY_QUESTIONS = 50;
+
 // --- API Routes ---
 app.get('/api/quota', authMiddleware, async (req, res) => {
   logger.debug(`GET /api/quota: User ID: ${req.userId}`);
   try {
-    const { rows } = await pool.query('SELECT questions_used, last_reset_date, has_seen_welcome_modal FROM users WHERE id = $1', [req.userId]);
+    const { rows } = await pool.query('SELECT questions_used, last_reset_date, has_seen_welcome_modal, bonus_questions FROM users WHERE id = $1', [req.userId]);
     const now = new Date();
     const startOfCurrentWeek = getStartOfWeek(now);
 
@@ -87,6 +91,7 @@ app.get('/api/quota', authMiddleware, async (req, res) => {
         res.json({
           questionsUsed: 0,
           lastResetDate: newResetTimestamp,
+          bonusQuestions: user.bonus_questions || 0,
           hasSeenWelcomeModal: user.has_seen_welcome_modal
         });
       } else {
@@ -95,6 +100,7 @@ app.get('/api/quota', authMiddleware, async (req, res) => {
         res.json({
           questionsUsed: user.questions_used,
           lastResetDate: user.last_reset_date,
+          bonusQuestions: user.bonus_questions || 0,
           hasSeenWelcomeModal: user.has_seen_welcome_modal
         });
       }
@@ -106,6 +112,7 @@ app.get('/api/quota', authMiddleware, async (req, res) => {
       res.json({
         questionsUsed: 0,
         lastResetDate: newResetTimestamp,
+        bonusQuestions: 0,
         hasSeenWelcomeModal: false
       });
     }
@@ -118,12 +125,71 @@ app.get('/api/quota', authMiddleware, async (req, res) => {
 app.post('/api/quota/increment', express.json(), authMiddleware, async (req, res) => {
   logger.debug(`POST /api/quota/increment: User ID: ${req.userId}`);
   try {
-    await pool.query('UPDATE users SET questions_used = questions_used + 1 WHERE id = $1', [req.userId]);
+    // Use the weekly allowance first. Bonus questions (from invite codes) are only spent once it is gone.
+    await pool.query(
+      `UPDATE users SET
+         questions_used = CASE WHEN questions_used < $1 OR COALESCE(bonus_questions, 0) <= 0 THEN questions_used + 1 ELSE questions_used END,
+         bonus_questions = CASE WHEN questions_used >= $1 AND COALESCE(bonus_questions, 0) > 0 THEN bonus_questions - 1 ELSE bonus_questions END
+       WHERE id = $2`,
+      [WEEKLY_QUESTIONS, req.userId]
+    );
+    const { rows } = await pool.query('SELECT questions_used, bonus_questions FROM users WHERE id = $1', [req.userId]);
     logger.info(`POST /api/quota/increment: Quota incremented for user ${req.userId}.`);
-    res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true, questionsUsed: rows[0]?.questions_used ?? 0, bonusQuestions: rows[0]?.bonus_questions || 0 });
   } catch (err) {
     logger.error(`POST /api/quota/increment: Error for user ${req.userId}:`, err.message);
     res.status(500).json({ error: 'Server Error' });
+  }
+});
+
+// --- Invite codes ---
+// The admin makes codes with ADMIN_API_KEY (see scripts/invite.js). Without a long enough key the admin
+// routes do not exist at all, so a fresh deployment has no admin surface.
+const adminAuth = (req, res, next) => {
+  const key = process.env.ADMIN_API_KEY;
+  if (!key || key.length < 24) return res.status(404).json({ error: 'Not found' });
+  const given = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const digest = (value) => crypto.createHash('sha256').update(value).digest();
+  if (!crypto.timingSafeEqual(digest(given), digest(key))) return res.status(401).json({ error: 'Invalid admin key' });
+  next();
+};
+
+const inviteErrorResponse = (res, err, where) => {
+  if (err instanceof InviteError) return res.status(err.status).json({ error: err.message });
+  logger.error(`${where}:`, err.message);
+  return res.status(500).json({ error: 'Server Error' });
+};
+
+app.post('/api/admin/invites', express.json(), adminAuth, async (req, res) => {
+  try {
+    const { email, questions, days } = req.body || {};
+    res.status(201).json(await createInvite({ email, questions, days }));
+  } catch (err) {
+    inviteErrorResponse(res, err, 'POST /api/admin/invites');
+  }
+});
+
+app.get('/api/admin/invites', adminAuth, async (req, res) => {
+  try {
+    res.json(await listInvites());
+  } catch (err) {
+    inviteErrorResponse(res, err, 'GET /api/admin/invites');
+  }
+});
+
+app.delete('/api/admin/invites/:code', adminAuth, async (req, res) => {
+  try {
+    res.json(await revokeInvite(req.params.code));
+  } catch (err) {
+    inviteErrorResponse(res, err, 'DELETE /api/admin/invites');
+  }
+});
+
+app.post('/api/invites/redeem', express.json(), authMiddleware, rateLimiter, async (req, res) => {
+  try {
+    res.json(await redeemInvite({ userId: req.userId, userEmail: req.userEmail, code: req.body?.code }));
+  } catch (err) {
+    inviteErrorResponse(res, err, 'POST /api/invites/redeem');
   }
 });
 
