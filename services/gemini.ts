@@ -19,6 +19,17 @@ export class GuestLimitError extends Error {
   }
 }
 
+/** The server says this signed in user has no questions left. */
+export class QuotaExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QuotaExceededError';
+  }
+}
+
+/** True for the response the server sends when a signed in user has no questions left. */
+export const isQuotaExceededBody = (status: number, data: any): boolean => status === 403 && data?.code === 'QUOTA_EXCEEDED';
+
 /** True for the response the server sends when a guest's free allowance is gone. */
 export const isGuestLimitBody = (status: number, data: any): boolean => status === 403 && data?.code === 'GUEST_LIMIT';
 
@@ -47,6 +58,7 @@ export const evaluateAnswer = async (questionText: string, userAnswer: string, m
     let data: any = null;
     try { data = JSON.parse(text); } catch { /* not JSON, fall through to the generic message */ }
     if (isGuestLimitBody(response.status, data)) throw new GuestLimitError(data.error);
+    if (isQuotaExceededBody(response.status, data)) throw new QuotaExceededError(data.error);
     throw new Error(data?.error || data?.message || `Failed to evaluate answer (HTTP ${response.status})`);
   }
 

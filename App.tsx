@@ -18,7 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import logger from './src/logger'; // Import the logger
-import { readErrorMessage, isGuestLimitBody } from './services/gemini';
+import { readErrorMessage, isGuestLimitBody, isQuotaExceededBody } from './services/gemini';
 import ProgressModal from './components/ProgressModal';
 import RedeemCodeModal from './components/RedeemCodeModal';
 import { codeFromAddress, clearCodeFromAddress } from './services/invites';
@@ -272,6 +272,11 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
                 setLimitModal({ isOpen: true, reason: 'sessions' });
                 return;
             }
+            if (isQuotaExceededBody(response.status, data)) {
+                // The server is the one that counts, so trust it over what the screen showed.
+                setLimitModal({ isOpen: true, reason: 'quota' });
+                return;
+            }
             if (response.status === 401) {
                 handleAuthError(handleLogout, 'Failed to fetch questions: Unauthorized.');
             }
@@ -412,40 +417,14 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     });
   };
 
-  // Spends one question of the weekly quota. Fire and forget: the answer is already on screen.
-  const spendQuota = useCallback(async () => {
-    try {
-      const response = await fetch('/api/quota/increment', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
-        },
-      });
-      if (response.ok) {
-        // The server decides whether a weekly or a bonus question was spent, and tells us where it landed.
-        const data = await response.json().catch(() => null);
-        if (data && typeof data.questionsUsed === 'number') {
-          setAuthQuota(prev => ({...prev, questionsUsed: data.questionsUsed, bonusQuestions: data.bonusQuestions ?? prev.bonusQuestions}));
-        } else {
-          setAuthQuota(prev => ({...prev, questionsUsed: prev.questionsUsed + 1}));
-        }
-      } else if (response.status === 401) {
-        handleAuthError(handleLogout, 'Failed to increment quota: Unauthorized.');
-      } else {
-        logger.error('Failed to increment quota on backend', response.statusText);
-      }
-    } catch (error) {
-      console.error('Error incrementing quota:', error);
-    }
-  }, [handleAuthError, handleLogout]);
-
-  // A retry is practice only: it never costs quota and never moves the rating.
-  const handleQuestionComplete = useCallback(({ question, classification, isRetry }: { question: Question, classification: AnswerOutcome, isRetry?: boolean }): RatingResult => {
+  // A retry is practice only: it never moves the rating. The server charges the question when it grades the
+  // answer and sends back the new numbers, so the app only has to show them.
+  const handleQuestionComplete = useCallback(({ question, classification, isRetry, quota }: { question: Question, classification: AnswerOutcome, isRetry?: boolean, quota?: { questionsUsed: number; bonusQuestions: number } }): RatingResult => {
     const before = skills.find(skill => skill.id === question.skillId)?.rating ?? 0;
+    if (quota) setAuthQuota(prev => ({ ...prev, questionsUsed: quota.questionsUsed, bonusQuestions: quota.bonusQuestions }));
     if (isRetry) return { before, after: before };
 
-    // Deduct from quota if it's the first time this question is being engaged with in this session
+    // Remember which questions were answered, so the ones left over can be saved when the session ends.
     if (isAuthenticated && practiceSession && !practiceSession.consumedQuestionIds.has(question.id)) {
         setPracticeSession(prevSession => {
             if (!prevSession) return null;
@@ -453,14 +432,13 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             newConsumedIds.add(question.id);
             return { ...prevSession, consumedQuestionIds: newConsumedIds };
         });
-        void spendQuota();
     }
 
     // The change depends on the level the question was asked at, and each level has a ceiling.
     const after = updateRating(before, classification, question.level);
     setSkills(prevSkills => prevSkills.map(skill => skill.id === question.skillId ? { ...skill, rating: after } : skill));
     return { before, after };
-  }, [skills, isAuthenticated, practiceSession, spendQuota, setPracticeSession, setSkills]);
+  }, [skills, isAuthenticated, practiceSession, setAuthQuota, setPracticeSession, setSkills]);
 
   // One tap start: the recommended level and a short session, so there is nothing to decide first.
   const handleQuickStart = useCallback((skill: Skill, level: ExperienceLevel = recommendedLevel(skill.rating)) => {

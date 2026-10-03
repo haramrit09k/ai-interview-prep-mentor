@@ -17,6 +17,7 @@ export interface EvaluationResponse {
   classification: EvaluationClassification;
   conceptsKnown?: string[]; // New: Concepts the user demonstrated understanding of
   conceptsToReview?: string[]; // New: Concepts the user missed or needs to improve on
+  quota?: { questionsUsed: number; bonusQuestions: number }; // signed in users: what the server now has on record
 }
 
 export interface Skill {

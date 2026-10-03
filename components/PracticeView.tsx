@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Question, AnswerOutcome, DeliveryStats, ExperienceLevel, RatingResult } from '../types';
-import { evaluateAnswer, readErrorMessage, GuestLimitError } from '../services/gemini';
+import type { Question, AnswerOutcome, DeliveryStats, EvaluationResponse, ExperienceLevel, RatingResult } from '../types';
+import { evaluateAnswer, readErrorMessage, GuestLimitError, QuotaExceededError } from '../services/gemini';
 import { ChevronLeftIcon, ChevronRightIcon, BrainCircuitIcon, SpinnerIcon } from './Icons';
 import MarkdownRenderer from './MarkdownRenderer';
 import { LimitReachedModal } from './LimitReachedModal';
@@ -27,7 +27,7 @@ interface PracticeViewProps {
   session: PracticeSession;
   onEndSession: () => void;
   onNavigate: (direction: 'next' | 'prev') => void;
-  onQuestionComplete: (args: { question: Question; classification: AnswerOutcome; isRetry?: boolean }) => RatingResult;
+  onQuestionComplete: (args: { question: Question; classification: AnswerOutcome; isRetry?: boolean; quota?: EvaluationResponse['quota'] }) => RatingResult;
   onPracticeAgain: (level: ExperienceLevel) => void;
   questionsRemaining: number; // Receive quota from App.tsx
   isAuthenticated: boolean; // Voice answers and progress tracking need a signed-in user
@@ -74,7 +74,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
 
     try {
       // An empty answer for "I Don't Know" still gets us the mentor answer and concepts to review.
-      const { mentorAnswer, feedback, classification } =
+      const { mentorAnswer, feedback, classification, quota } =
         await evaluateAnswer(currentQuestion.text, isIdk ? "" : userAnswer, {
           skillId: session.skill.id,
           skillName: session.skill.name,
@@ -93,7 +93,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
       }
       // Only count the question (quota, rating, history) once we actually got an evaluation.
       const finalOutcome: AnswerOutcome = isIdk ? 'idk' : classification;
-      const rating = onQuestionComplete({ question: currentQuestion, classification: finalOutcome, isRetry });
+      const rating = onQuestionComplete({ question: currentQuestion, classification: finalOutcome, isRetry, quota });
       setOutcome(finalOutcome);
       setWasRetry(isRetry);
       setIsEditing(false);
@@ -102,7 +102,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
         setResults(prev => ({ ...prev, [currentQuestion.id]: { outcome: finalOutcome, ...rating } }));
       }
     } catch (error) {
-      if (error instanceof GuestLimitError) {
+      if (error instanceof GuestLimitError || error instanceof QuotaExceededError) {
         setShowLimitModal(true);
       } else {
         setEvaluationError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');

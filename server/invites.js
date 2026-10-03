@@ -10,6 +10,7 @@
 const crypto = require('crypto');
 const pool = require('./db');
 const logger = require('./logger');
+const { getStartOfWeek } = require('./quota');
 
 // 32 characters with no 0/O or 1/I, so a code is easy to read out or type from a message.
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -153,14 +154,6 @@ async function revokeInvite(rawCode) {
   return { code, revoked: true, budget: await budgetSummary(nowIso) };
 }
 
-const startOfWeekIso = () => {
-  const d = new Date();
-  const diff = d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1);
-  d.setDate(diff);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-};
-
 /**
  * Adds a code's questions to the signed in user's bonus balance.
  * The email on the code must match the verified email of the Google account that redeems it.
@@ -190,7 +183,7 @@ async function redeemInvite({ userId, userEmail, code: rawCode }) {
   try {
     await pool.query(
       'INSERT INTO users (id, questions_used, last_reset_date, has_seen_welcome_modal) VALUES ($1, 0, $2, FALSE) ON CONFLICT (id) DO NOTHING',
-      [userId, startOfWeekIso()]
+      [userId, getStartOfWeek(new Date()).toISOString()]
     );
     await pool.query('UPDATE users SET bonus_questions = COALESCE(bonus_questions, 0) + $1 WHERE id = $2', [Number(invite.questions), userId]);
   } catch (err) {
