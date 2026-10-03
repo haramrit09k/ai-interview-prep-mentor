@@ -110,6 +110,9 @@ test('evaluate: guests work and are not recorded, signed-in users are', async ()
   // a cache hit must still be recorded for the signed-in user
   assert.equal((await call('POST', '/api/evaluate', { token: 'alice', json: { questionText: 'a1', userAnswer: 'a', ...meta, isIdk: true } })).status, 200);
 
+  // a second try after seeing the mentor answer is graded but not recorded
+  assert.equal((await call('POST', '/api/evaluate', { token: 'alice', json: { questionText: 'a1', userAnswer: 'a', ...meta, isRetry: true } })).status, 200);
+
   const insights = await (await call('GET', '/api/insights', { token: 'alice' })).json();
   assert.equal(insights.totals.answers, 2);
   assert.equal(insights.skills[0].name, 'JavaScript');

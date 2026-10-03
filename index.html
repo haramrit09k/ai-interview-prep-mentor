@@ -5,29 +5,52 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ACE - AI Interview Prep</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+    <meta name="theme-color" content="#121212" />
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script>
       tailwind.config = {
         darkMode: 'class',
         theme: {
           extend: {
+            fontFamily: {
+              sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+              mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+            },
             colors: {
+              // Orange accent on a neutral charcoal base. White text on brand-primary and brand-hover passes AA.
               'brand': {
-                'primary': '#4f46e5',
-                'secondary': '#7c3aed',
-                'light': '#6366f1',
-                'dark': '#3730a3',
+                'primary': '#c2410c',
+                'hover': '#9a3412',
+                'secondary': '#f59e0b',
+                'light': '#fb923c',
+                'dark': '#7c2d12',
               },
               'background': {
-                'dark': '#111827',
-                'medium': '#1f2937',
-                'light': '#374151',
+                'dark': '#121212',
+                'medium': '#1c1c1c',
+                'light': '#2a2a2a',
               },
               'text': {
-                'primary': '#f9fafb',
-                'secondary': '#d1d5db',
-                'muted': '#9ca3af',
-              }
+                'primary': '#f5f5f5',
+                'secondary': '#d4d4d4',
+                'muted': '#a3a3a3',
+              },
+              // Entry, Mid and Expert use the green, amber and red people know from problem difficulty tags.
+              'level': {
+                'entry': '#4ade80',
+                'mid': '#fbbf24',
+                'expert': '#f87171',
+              },
+              // Neutral greys replace Tailwind's blue tinted ones so every surface matches the charcoal base.
+              'gray': {
+                '500': '#6b6b6b',
+                '600': '#3d3d3d',
+                '700': '#303030',
+                '800': '#222222',
+              },
             },
             typography: ({ theme }) => ({
               invert: {
@@ -54,7 +77,7 @@
       .prose :not(pre) > code::before,
       .prose :not(pre) > code::after { content: none; }
       .prose :not(pre) > code {
-        background: #111827;
+        background: #121212;
         padding: 0.1rem 0.35rem;
         border-radius: 0.25rem;
         font-size: 0.9em;
@@ -62,7 +85,7 @@
       }
     </style>
 </head>
-  <body class="bg-background-dark">
+  <body class="bg-background-dark font-sans antialiased">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

@@ -114,3 +114,9 @@ export interface SkillReview {
   /** A summary written by the old AI-based review, kept so nothing is lost. */
   previousSummary: { conceptsKnown: string; conceptsToReview: string; lastUpdated?: string } | null;
 }
+
+/** What one answer did to a skill's expertise rating. Shown right after the feedback. */
+export interface RatingResult {
+  before: number;
+  after: number;
+}

@@ -91,7 +91,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({ skill, isAuthenticated, onClo
       return (
         <div role="alert" className="space-y-3">
           <p className="text-red-200 bg-red-900/40 border border-red-500/50 rounded-lg p-3">{error}</p>
-          <button onClick={load} className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light focus-visible:ring-2 focus-visible:ring-white">Try again</button>
+          <button onClick={load} className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-white">Try again</button>
         </div>
       );
     }
@@ -163,7 +163,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({ skill, isAuthenticated, onClo
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={() => onPractice(review.retry.slice(0, SESSION_SIZE))}
-                  className="py-2.5 px-5 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-light focus-visible:ring-2 focus-visible:ring-white transition-colors"
+                  className="py-2.5 px-5 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-white transition-colors"
                 >
                   Practise {startSize === 1 ? '1 missed question' : `${startSize} missed questions`}
                 </button>

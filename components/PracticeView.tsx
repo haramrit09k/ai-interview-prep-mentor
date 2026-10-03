@@ -1,12 +1,22 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Question, AnswerOutcome, DeliveryStats } from '../types';
+import type { Question, AnswerOutcome, DeliveryStats, ExperienceLevel, RatingResult } from '../types';
 import { evaluateAnswer, readErrorMessage } from '../services/gemini';
 import { ChevronLeftIcon, ChevronRightIcon, BrainCircuitIcon, SpinnerIcon } from './Icons';
 import MarkdownRenderer from './MarkdownRenderer';
 import { LimitReachedModal } from './LimitReachedModal';
 import VoiceRecorder from './VoiceRecorder';
 import DeliveryCard from './DeliveryCard';
+import SessionSummary, { AnswerResult } from './SessionSummary';
+import { RATING_CEILING } from '../utils/rating';
+import { LEVEL_STYLE } from '../utils/practiceDefaults';
+
+const OUTCOME_LABEL: Record<AnswerOutcome, { text: string; tone: string }> = {
+  correct: { text: 'Correct', tone: 'text-level-entry border-level-entry' },
+  partially_correct: { text: 'Partly right', tone: 'text-level-mid border-level-mid' },
+  incorrect: { text: 'Not quite', tone: 'text-level-expert border-level-expert' },
+  idk: { text: 'Skipped', tone: 'text-text-secondary border-gray-600' },
+};
 
 interface PracticeSession {
   skill: { id: string; name: string };
@@ -17,12 +27,13 @@ interface PracticeViewProps {
   session: PracticeSession;
   onEndSession: () => void;
   onNavigate: (direction: 'next' | 'prev') => void;
-  onQuestionComplete: (args: { question: Question; classification: AnswerOutcome; conceptsKnown?: string[]; conceptsToReview?: string[] }) => void;
+  onQuestionComplete: (args: { question: Question; classification: AnswerOutcome; isRetry?: boolean }) => RatingResult;
+  onPracticeAgain: (level: ExperienceLevel) => void;
   questionsRemaining: number; // Receive quota from App.tsx
   isAuthenticated: boolean; // Voice answers and progress tracking need a signed-in user
 }
 
-const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNavigate, onQuestionComplete, questionsRemaining, isAuthenticated }) => {
+const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNavigate, onQuestionComplete, onPracticeAgain, questionsRemaining, isAuthenticated }) => {
   const currentQuestion: Question = session.questions[session.currentQuestionIndex];
 
   const [userAnswer, setUserAnswer] = useState('');
@@ -35,6 +46,13 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
   const [delivery, setDelivery] = useState<DeliveryStats | null>(null);
   const [transcriptNotice, setTranscriptNotice] = useState(false);
   const feedbackHeadingRef = useRef<HTMLHeadingElement>(null);
+  // What happened on the answer on screen, and across the session so far.
+  const [outcome, setOutcome] = useState<AnswerOutcome | null>(null);
+  const [ratingResult, setRatingResult] = useState<RatingResult | null>(null);
+  const [wasRetry, setWasRetry] = useState(false);
+  const [isEditing, setIsEditing] = useState(false); // true while giving a second try after the feedback
+  const [results, setResults] = useState<Record<string, AnswerResult>>({});
+  const [showSummary, setShowSummary] = useState(false);
 
   const handleSubmission = useCallback(async (isIdk: boolean) => {
     if (!currentQuestion) return;
@@ -48,14 +66,17 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
 
     setEvaluationError(null);
     setIsSubmitting(true);
+    // Seeing the mentor answer first makes a second go practice only: it is graded but never counted.
+    const isRetry = viewedAnswer;
 
     try {
       // An empty answer for "I Don't Know" still gets us the mentor answer and concepts to review.
-      const { mentorAnswer, feedback, classification, conceptsKnown, conceptsToReview } =
+      const { mentorAnswer, feedback, classification } =
         await evaluateAnswer(currentQuestion.text, isIdk ? "" : userAnswer, {
           skillId: session.skill.id,
           skillName: session.skill.name,
           isIdk,
+          isRetry,
           level: currentQuestion.level,
           delivery: isIdk ? null : delivery,
         });
@@ -68,7 +89,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
         setFeedback(feedback);
       }
       // Only count the question (quota, rating, history) once we actually got an evaluation.
-      onQuestionComplete({ question: currentQuestion, classification: isIdk ? 'idk' : classification, conceptsKnown, conceptsToReview });
+      const finalOutcome: AnswerOutcome = isIdk ? 'idk' : classification;
+      const rating = onQuestionComplete({ question: currentQuestion, classification: finalOutcome, isRetry });
+      setOutcome(finalOutcome);
+      setWasRetry(isRetry);
+      setIsEditing(false);
+      if (!isRetry) {
+        setRatingResult(rating);
+        setResults(prev => ({ ...prev, [currentQuestion.id]: { outcome: finalOutcome, ...rating } }));
+      }
     } catch (error) {
       setEvaluationError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
     } finally {
@@ -85,12 +114,16 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     setEvaluationError(null);
     setDelivery(null);
     setTranscriptNotice(false);
+    setOutcome(null);
+    setRatingResult(null);
+    setWasRetry(false);
+    setIsEditing(false);
   }, [session.currentQuestionIndex, session.skill.id]);
 
   // Move keyboard and screen reader focus to the feedback as soon as it is ready.
   useEffect(() => {
-    if (viewedAnswer && !isSubmitting) feedbackHeadingRef.current?.focus();
-  }, [viewedAnswer, isSubmitting]);
+    if (viewedAnswer && !isSubmitting && !isEditing) feedbackHeadingRef.current?.focus();
+  }, [viewedAnswer, isSubmitting, isEditing]);
 
   const handleVoiceResult = useCallback((transcript: string, stats: DeliveryStats) => {
     setUserAnswer(transcript.slice(0, 5000));
@@ -124,6 +157,41 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     }
   }, []);
 
+  const isLastQuestion = session.currentQuestionIndex === session.questions.length - 1;
+  const answeredCount = Object.keys(results).length;
+
+  const handleFinish = () => setShowSummary(true);
+  // Ending with answers on the board shows the recap first, so quitting is never a trapdoor.
+  const handleEnd = () => (answeredCount > 0 ? setShowSummary(true) : onEndSession());
+
+  const renderResultChip = () => {
+    if (!outcome) return null;
+    const { text, tone } = OUTCOME_LABEL[outcome];
+    const level = currentQuestion.level;
+    let ratingNote: string | null = null;
+    if (wasRetry) {
+      ratingNote = 'Practice try: your rating stays as it is.';
+    } else if (ratingResult) {
+      const change = ratingResult.after - ratingResult.before;
+      if (change !== 0) {
+        ratingNote = `${change > 0 ? '+' : ''}${change} ${session.skill.name}: ${ratingResult.before}% to ${ratingResult.after}%`;
+      } else if (outcome === 'correct' || outcome === 'partially_correct') {
+        const cap = RATING_CEILING[level ?? 'Mid-level'];
+        ratingNote = `${session.skill.name} stays at ${ratingResult.after}%. ${level ?? 'Mid-level'} questions top out at ${cap}%, so try a harder level to keep growing.`;
+      } else {
+        ratingNote = `${session.skill.name} stays at ${ratingResult.after}%.`;
+      }
+    }
+    return (
+      <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3">
+        <span className={`font-mono text-xs font-bold uppercase tracking-wide border rounded px-2 py-0.5 ${tone}`}>{text}</span>
+        {ratingNote && (
+          <span className={`text-sm font-mono ${ratingResult && !wasRetry && ratingResult.after > ratingResult.before ? 'text-level-entry' : 'text-text-secondary'}`}>{ratingNote}</span>
+        )}
+      </div>
+    );
+  };
+
   const renderContent = () => {
     if (isSubmitting) {
       return (
@@ -134,10 +202,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
       );
     }
     
-    if (viewedAnswer) {
+    if (viewedAnswer && !isEditing) {
       return (
         <div className="space-y-6">
           <div>
+            {outcome && renderResultChip()}
             <h3 ref={feedbackHeadingRef} tabIndex={-1} className="text-lg sm:text-xl font-bold text-brand-light mb-2 outline-none focus-visible:ring-2 focus-visible:ring-brand-light rounded">Feedback on Your Answer</h3>
             <div className="bg-background-dark/50 p-3 sm:p-4 rounded-lg text-sm sm:text-base">
                 <MarkdownRenderer content={feedback} />
@@ -150,6 +219,22 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
             </div>
           </div>
           {delivery && <DeliveryCard stats={delivery} />}
+          <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
+            {outcome !== 'correct' && (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="sm:flex-none py-3 px-6 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors"
+              >
+                Try again
+              </button>
+            )}
+            <button
+              onClick={isLastQuestion ? handleFinish : () => onNavigate('next')}
+              className="flex-1 py-3 px-6 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-hover transition-colors"
+            >
+              {isLastQuestion ? 'Finish session' : 'Next question'}
+            </button>
+          </div>
         </div>
       );
     }
@@ -165,6 +250,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
           <VoiceRecorder onResult={handleVoiceResult} disabled={isSubmitting} />
         ) : (
           <p className="text-sm text-text-muted">Sign in to answer out loud and get feedback on your pace and filler words.</p>
+        )}
+        {viewedAnswer && (
+          <p className="text-sm text-text-secondary">Try it again in your own words. This one is practice, so it will not change your rating.</p>
         )}
         {transcriptNotice && (
           <p role="status" className="text-sm text-text-secondary bg-background-dark/50 rounded-lg p-3">
@@ -188,20 +276,46 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
             <button
                 onClick={() => handleSubmission(false)}
                 disabled={!userAnswer.trim()}
-                className="flex-1 flex items-center justify-center gap-2 py-3 px-6 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-light disabled:bg-gray-500 disabled:cursor-not-allowed transition-all"
+                className="flex-1 flex items-center justify-center gap-2 py-3 px-6 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-hover disabled:bg-gray-500 disabled:cursor-not-allowed transition-all"
             >
-                <BrainCircuitIcon className="w-6 h-6" /> Submit for Feedback
+                <BrainCircuitIcon className="w-6 h-6" /> {viewedAnswer ? 'Check my new answer' : 'Submit for Feedback'}
             </button>
-            <button
+            {!viewedAnswer ? (
+              <button
                 onClick={() => handleSubmission(true)}
-                className="flex-1 sm:flex-none py-3 px-6 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-gray-600 transition-colors"
-            >
-                I Don't Know
-            </button>
+                className="flex-1 sm:flex-none py-3 px-4 rounded-lg text-text-muted font-medium underline underline-offset-4 hover:text-text-primary transition-colors"
+              >
+                I don't know, show me the answer
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsEditing(false)}
+                className="flex-1 sm:flex-none py-3 px-4 rounded-lg text-text-muted font-medium underline underline-offset-4 hover:text-text-primary transition-colors"
+              >
+                Back to feedback
+              </button>
+            )}
         </div>
       </div>
     );
   };
+
+  if (showSummary) {
+    const answered = session.questions.filter(q => results[q.id]);
+    const level = answered.find(q => q.level)?.level ?? 'Mid-level';
+    // Object keys keep the order the questions were first answered in, which the rating start and end rely on.
+    return (
+      <SessionSummary
+        skillName={session.skill.name}
+        level={level}
+        total={session.questions.length}
+        results={Object.values(results)}
+        onBack={onEndSession}
+        onKeepGoing={() => setShowSummary(false)}
+        onPracticeAgain={onPracticeAgain}
+      />
+    );
+  }
 
   return (
     <>
@@ -218,9 +332,19 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
           <div>
             <h1 className="text-2xl font-bold text-text-primary">Practice: {session.skill.name}</h1>
             <p className="text-text-muted">Question {session.currentQuestionIndex + 1} of {session.questions.length}</p>
+            <div className="flex gap-1.5 mt-2" aria-hidden="true">
+              {session.questions.map((q, i) => {
+                const result = results[q.id];
+                const color = !result ? 'bg-gray-600'
+                  : result.outcome === 'correct' ? 'bg-level-entry'
+                  : result.outcome === 'partially_correct' ? 'bg-level-mid'
+                  : 'bg-level-expert';
+                return <span key={q.id} className={`h-1.5 w-6 rounded-full ${color} ${i === session.currentQuestionIndex ? 'ring-2 ring-offset-2 ring-offset-background-dark ring-brand-light' : ''}`} />;
+              })}
+            </div>
           </div>
           <button
-            onClick={onEndSession}
+            onClick={handleEnd}
             className="py-2 px-4 rounded-lg bg-background-medium text-text-primary font-semibold hover:bg-background-light transition-colors"
           >
             End Session
@@ -232,6 +356,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
             <div className="mb-8">
               <p className="text-sm font-semibold text-brand-light mb-2">
                 {currentQuestion.source === 'custom' ? 'Your Custom Question' : 'AI-Generated Question'}
+                {currentQuestion.level && (
+                  <span className={`ml-2 font-mono text-xs font-bold uppercase tracking-wide ${LEVEL_STYLE[currentQuestion.level].text}`}>{LEVEL_STYLE[currentQuestion.level].short}</span>
+                )}
               </p>
               <p className="text-2xl md:text-3xl font-medium text-text-primary leading-snug">{currentQuestion.text}</p>
             </div>
@@ -248,13 +375,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
               >
                 <ChevronLeftIcon /> Previous
               </button>
-              <button
-                onClick={() => onNavigate('next')}
-                disabled={session.currentQuestionIndex === session.questions.length - 1}
-                className="flex items-center gap-2 py-2 px-4 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-light disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors w-full sm:w-auto justify-center"
-              >
-                Next <ChevronRightIcon />
-              </button>
+              {!viewedAnswer && (
+                <button
+                  onClick={() => onNavigate('next')}
+                  disabled={isLastQuestion}
+                  className="flex items-center gap-2 py-2 px-4 rounded-lg bg-background-light text-text-primary font-semibold hover:bg-background-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto justify-center border border-transparent hover:border-gray-600"
+                >
+                  Skip <ChevronRightIcon />
+                </button>
+              )}
             </div>
           </div>
         </main>

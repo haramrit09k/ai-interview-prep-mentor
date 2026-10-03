@@ -8,12 +8,15 @@ I built it to learn how the pieces of a small paid web product fit together: log
 
 ## What it does
 
+- One tap start: pick a starter skill (or press Practice on any skill) and a short round begins at a recommended level. Change opens the level and length options
 - Generates questions for any skill at entry, mid, or expert level
 - Evaluates free-text answers and classifies them as correct, partially correct, or incorrect
 - Lets signed-in users answer out loud (desktop or mobile), then shows a transcript to review and edit before submitting
 - Coaches delivery on spoken answers: words per minute against a typical interview range, and a count of filler words with plain-language tips
 - Progress view: practice streak, week-over-week accuracy, per-skill trends, concepts you keep missing versus ones you have mastered, speaking trends, and a suggested next step
 - Built to be accessible: everything works from the keyboard, nothing relies on colour alone, the progress view opens with a one-sentence summary, and typing is always available as an alternative to voice
+- After each answer it shows how your rating moved and offers Next question or Try again (a practice retry that is not recorded and does not change your rating). Each round ends with a short recap
+- The home screen has an Up next card that suggests what to practise, and signed-in users see their practice streak in the header
 - Keeps a skill rating that moves with your answers (+10 correct, +5 partial, -5 wrong or "I don't know")
 - Saves questions you didn't get to, and serves them first next time
 - A Review button on every skill opens a study sheet built from your whole history: the questions worth another try (with a one-click "practise these" session), concepts you keep missing, concepts you have mastered, and how that skill is trending

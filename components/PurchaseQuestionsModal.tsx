@@ -53,7 +53,7 @@ const PurchaseQuestionsModal: React.FC<PurchaseQuestionsModalProps> = ({ onClose
           <div className="mt-6 flex justify-end">
             <button
               onClick={() => { onPurchase(selectedOption.quantity, selectedOption.priceCents); onClose(); }}
-              className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-sm"
+              className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-hover transition-colors text-sm"
             >
               Buy {selectedOption.quantity} Questions
             </button>

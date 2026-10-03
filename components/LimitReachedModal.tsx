@@ -80,7 +80,7 @@ export const LimitReachedModal: React.FC<LimitReachedModalProps> = ({ onClose, o
               <>
                 <button
                   onClick={() => onUpgrade(selectedOption.quantity, selectedOption.priceCents)}
-                  className="flex-1 text-center py-2.5 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-sm"
+                  className="flex-1 text-center py-2.5 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-hover transition-colors text-sm"
                 >
                   Buy {selectedOption.quantity} Questions (${(selectedOption.priceCents / 100).toFixed(2)}) & Continue
                 </button>

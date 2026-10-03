@@ -95,7 +95,7 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ skills, onClo
               <button
                 type="submit"
                 disabled={skills.length === 0}
-                className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
+                className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-hover disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
               >
                 Add Question
               </button>
