@@ -44,8 +44,9 @@ stub('rateLimiter.js', { rateLimiter: (req, res, next) => next() });
 
 let geminiMode = 'ok';
 let evaluateCalls = 0;
+let questionCalls = [];
 stub('geminiService.js', {
-  generateQuestionsForSkill: async () => [],
+  generateQuestionsForSkill: async (...args) => { questionCalls.push(args); return [{ text: 'fresh question', level: args[1], skillId: args[3] }]; },
   evaluateAnswer: async () => {
     evaluateCalls += 1;
     if (geminiMode === 'fail') throw new Error('upstream down');
@@ -160,4 +161,38 @@ test('transcribe: silence is a friendly 422 and upstream failure a 502', async (
   const quiet = await call('POST', '/api/transcribe', { token: 'alice', body: audio(), headers: { 'Content-Type': 'audio/webm', 'X-Audio-Duration-Ms': '5000' } });
   assert.equal(quiet.status, 422);
   geminiMode = 'ok';
+});
+
+test('questions: validates level, caps the count, and only signed-in users get repeat avoidance', async () => {
+  const url = (extra = '') => `/api/questions?skillName=Java&level=Mid-level&skillId=java&count=5${extra}`;
+  assert.equal((await call('GET', '/api/questions?skillName=Java&level=Wizard&skillId=java&count=5')).status, 400);
+  assert.equal((await call('GET', '/api/questions?skillName=Java&level=Mid-level&skillId=java&count=0')).status, 400);
+
+  // a guest has no history to avoid
+  questionCalls = [];
+  assert.equal((await call('GET', url())).status, 200);
+  assert.deepEqual(questionCalls[0][4] ?? [], []);
+
+  // a huge count is capped at one session's worth
+  questionCalls = [];
+  await call('GET', '/api/questions?skillName=Java&level=Mid-level&skillId=java&count=100000');
+  assert.equal(questionCalls[0][2], 15);
+
+  // a signed-in user's previously answered questions for that skill are passed along
+  for (const text of ['Already seen one?', 'Already seen two?']) {
+    await call('POST', '/api/evaluate', { token: 'carol', json: { questionText: text, userAnswer: 'a', skillId: 'java', skillName: 'Java' } });
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  await call('POST', '/api/evaluate', { token: 'carol', json: { questionText: 'Other skill?', userAnswer: 'a', skillId: 'go', skillName: 'Go' } });
+  questionCalls = [];
+  assert.equal((await call('GET', url(), { token: 'carol' })).status, 200);
+  assert.deepEqual(questionCalls[0][4], ['Already seen two?', 'Already seen one?']);
+});
+
+test('evaluate: an overlong question and a tag-spoofing answer still work and share one cache entry', async () => {
+  evaluateCalls = 0;
+  const body = { questionText: 'q'.repeat(2000), userAnswer: 'answer' };
+  assert.equal((await call('POST', '/api/evaluate', { json: body })).status, 200);
+  assert.equal((await call('POST', '/api/evaluate', { json: { ...body, questionText: 'q'.repeat(2500) } })).status, 200);
+  assert.equal(evaluateCalls, 1, 'both trimmed to the same text, so the second is a cache hit');
 });

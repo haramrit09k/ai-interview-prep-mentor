@@ -49,6 +49,7 @@ const SkillManagement: React.FC<SkillManagementProps> = ({
           <input
             type="text"
             value={newSkill}
+            maxLength={60}
             onChange={(e) => setNewSkill(e.target.value)}
             placeholder={isSkillLimitReached ? "Skill limit reached" : "e.g., Apache Spark, MLOps..."}
             className="flex-grow bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-2.5 text-sm disabled:cursor-not-allowed disabled:bg-gray-700"

@@ -31,10 +31,10 @@ const cleanJsonString = (str) => {
   return cleaned.trim();
 };
 
-const generateQuestionsForSkill = async (skillName, level, count, skillId) => {
+const generateQuestionsForSkill = async (skillName, level, count, skillId, avoidQuestions = []) => {
   logger.debug('Generating questions for skill:', { skillName, level, count, skillId });
   try {
-    const contents = buildQuestionsPrompt(skillName, level, count);
+    const contents = buildQuestionsPrompt(skillName, level, count, avoidQuestions);
 
     const response = await ai.models.generateContent({
       model: model,
@@ -91,13 +91,8 @@ const generateQuestionsForSkill = async (skillName, level, count, skillId) => {
 const evaluateAnswer = async (questionText, userAnswer) => {
   logger.debug('Evaluating answer for question:', questionText);
   try {
-      // Truncate userAnswer to prevent excessively long inputs
-      const MAX_USER_ANSWER_LENGTH = 5000; // Approximately 1000 words
-      const truncatedUserAnswer = userAnswer.length > MAX_USER_ANSWER_LENGTH 
-          ? userAnswer.substring(0, MAX_USER_ANSWER_LENGTH) 
-          : userAnswer;
-
-      const prompt = buildEvaluationPrompt(questionText, truncatedUserAnswer);
+      // The prompt builder trims and caps the answer (LIMITS.ANSWER), so it is passed through as is.
+      const prompt = buildEvaluationPrompt(questionText, userAnswer);
 
       const response = await ai.models.generateContent({
           model: model,
@@ -138,11 +133,18 @@ const evaluateAnswer = async (questionText, userAnswer) => {
           !validClassifications.includes(result.classification)) {
         throw new Error("Evaluation response was not in the expected format");
       }
-      return {
+      const evaluation = {
         ...result,
         conceptsKnown: Array.isArray(result.conceptsKnown) ? result.conceptsKnown : [],
         conceptsToReview: Array.isArray(result.conceptsToReview) ? result.conceptsToReview : [],
       };
+      // No answer means nothing was demonstrated. The prompt asks for this, and we enforce it here
+      // so a model slip can never turn "I don't know" into credit.
+      if (!String(userAnswer ?? '').trim()) {
+        evaluation.classification = 'incorrect';
+        evaluation.conceptsKnown = [];
+      }
+      return evaluation;
   } catch (error) {
       // Let the route decide how to respond. Returning a fake "incorrect" result here
       // would hide outages, charge the user quota and get cached as if it were real.

@@ -149,6 +149,7 @@ db.query(createTableSql)
     );
   `))
   .then(() => db.query('CREATE INDEX IF NOT EXISTS idx_answer_log_user_time ON answer_log (user_id, answered_at);'))
+  .then(() => db.query('CREATE INDEX IF NOT EXISTS idx_answer_log_user_skill_time ON answer_log (user_id, skill_id, answered_at);'))
   .then(() => logger.info('Database schema initialization complete.'))
   .catch(err => logger.error('Error initializing database schema', err));
 

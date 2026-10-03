@@ -8,7 +8,8 @@ const { authOptionalMiddleware } = require('./authOptional');
 const { generateQuestionsForSkill, evaluateAnswer, transcribeAudio } = require('./geminiService');
 const { analyzeDelivery, sanitizeDelivery } = require('./deliveryStats');
 const { computeInsights } = require('./insights');
-const { insertAnswer, listAnswers, deleteAnswers } = require('./answerLog');
+const { insertAnswer, listAnswers, recentQuestions, deleteAnswers } = require('./answerLog');
+const { LIMITS, LEVELS, cleanBlock } = require('./prompts');
 const { generateRevisionSummary } = require('./summaryService');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
@@ -141,9 +142,10 @@ app.post('/api/user/seen-welcome-modal', express.json(), authMiddleware, async (
 app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) => {
   logger.debug(`GET /api/questions: User ID: ${req.userId}`);
   const { skillName, level, count, skillId } = req.query; // skillId is now expected
-  const requestedCount = parseInt(count, 10);
+  // Cap the size of a session, which also caps what one request can cost.
+  const requestedCount = Math.min(parseInt(count, 10), LIMITS.MAX_QUESTIONS);
 
-  if (!skillName || !level || !skillId || isNaN(requestedCount) || requestedCount <= 0) {
+  if (!skillName || !skillId || !LEVELS.includes(level) || isNaN(requestedCount) || requestedCount <= 0) {
     logger.warn(`GET /api/questions: Invalid request parameters for user ${req.userId}.`);
     return res.status(400).json({ error: 'Missing or invalid parameters: skillName, level, count, skillId' });
   }
@@ -178,7 +180,15 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
 
       if (remainingCount > 0) {
         logger.info(`GET /api/questions: Generating ${remainingCount} new questions for user ${req.userId}.`);
-        const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount, skillId);
+        // Tell the model what this user has already seen for this skill so it does not repeat itself.
+        // The lookup is best effort: if it fails we still generate, just without the hint.
+        let avoid = questionsToReturn.map((q) => q.text);
+        try {
+          avoid = [...avoid, ...(await recentQuestions(req.userId, String(skillId), LIMITS.AVOID_ITEMS))];
+        } catch (lookupErr) {
+          logger.warn(`GET /api/questions: could not load recent questions for user ${req.userId}: ${lookupErr.message}`);
+        }
+        const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount, skillId, avoid);
         questionsToReturn = [...questionsToReturn, ...newQuestions];
       }
 
@@ -214,8 +224,10 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
 
   try {
     // Create a hash of the user's answer to use in the cache key
-    const answerHash = crypto.createHash('sha256').update(userAnswer).digest('hex');
-    const cacheKey = `evaluation:${questionText}:${answerHash}`;
+    // Same trimming the prompt applies, so the cache key matches what the model actually sees.
+    const question = cleanBlock(questionText, LIMITS.QUESTION);
+    const answerHash = crypto.createHash('sha256').update(cleanBlock(userAnswer, LIMITS.ANSWER)).digest('hex');
+    const cacheKey = `evaluation:${question}:${answerHash}`;
     let evaluation;
     const cachedEvaluation = await redisClient.get(cacheKey);
 

@@ -47,3 +47,17 @@ test('clips oversized and malformed input', async () => {
   assert.equal(known.length, 1);
   assert.equal(known[0].length, 100);
 });
+
+const { recentQuestions } = require('../server/answerLog');
+
+test('recentQuestions: newest first, no duplicates, per skill, bounded', async () => {
+  const base = { userId: 'rq', skillName: 'Java', outcome: 'correct', conceptsKnown: [], conceptsToReview: [] };
+  for (const [skillId, text] of [['java', 'q1'], ['java', 'q2'], ['go', 'go-q'], ['java', 'q1'], ['java', 'q3']]) {
+    await insertAnswer({ ...base, skillId, questionText: text });
+    await new Promise((r) => setTimeout(r, 5)); // distinct timestamps
+  }
+  assert.deepEqual(await recentQuestions('rq', 'java', 10), ['q3', 'q1', 'q2']);
+  assert.deepEqual(await recentQuestions('rq', 'go', 10), ['go-q']);
+  assert.deepEqual(await recentQuestions('rq', 'java', 2), ['q3', 'q1']);
+  assert.deepEqual(await recentQuestions('nobody', 'java', 10), []);
+});
