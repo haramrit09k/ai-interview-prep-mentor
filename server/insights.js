@@ -308,4 +308,27 @@ function computeSkillReview(rows, { now = Date.now() } = {}) {
   };
 }
 
-module.exports = { computeInsights, computeSkillReview };
+const MAX_RESTORED_SKILLS = 20; // the app keeps at most 5, this only keeps the reply small
+
+/**
+ * What the app needs to rebuild a user's skills list on a new browser: every skill they have practised, with
+ * its original id and name and the outcome and level of each answer in order. The app replays the answers
+ * with its own rating rules, so the rating rules live in one place.
+ * @param {Array} rows Answer log rows, oldest first.
+ * @returns {{ id: string, name: string, lastPracticed: string, answers: [string, string|null][] }[]} most recent first
+ */
+function computeSkillHistory(rows) {
+  const bySkill = new Map();
+  for (const row of [...rows].sort((a, b) => Date.parse(a.answered_at) - Date.parse(b.answered_at))) {
+    const entry = bySkill.get(row.skill_id) || { id: row.skill_id, name: row.skill_name, lastPracticed: row.answered_at, answers: [] };
+    entry.name = row.skill_name; // the latest spelling wins
+    entry.lastPracticed = row.answered_at;
+    entry.answers.push([row.outcome, row.level || null]);
+    bySkill.set(row.skill_id, entry);
+  }
+  return [...bySkill.values()]
+    .sort((a, b) => Date.parse(b.lastPracticed) - Date.parse(a.lastPracticed))
+    .slice(0, MAX_RESTORED_SKILLS);
+}
+
+module.exports = { computeInsights, computeSkillReview, computeSkillHistory };

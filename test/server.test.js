@@ -565,3 +565,52 @@ test('admin: a weak key is not accepted, and too many wrong keys lock the addres
     process.env.ADMIN_API_KEY = ADMIN_KEY;
   }
 });
+
+const answerFor = async (token, skillId, skillName, text, extra = {}) => {
+  const res = await call('POST', '/api/evaluate', { token, json: { questionText: text, userAnswer: 'a', skillId, skillName, ...extra } });
+  assert.equal(res.status, 200);
+  await new Promise((r) => setTimeout(r, 5)); // keep the answers in a clear order
+};
+
+test('skills history: gives a new browser what it needs to rebuild the skills list, privately', async () => {
+  const user = 'history@example.test';
+  await answerFor(user, 'py-id', 'Python', 'history q1', { level: 'Mid-level' });
+  await answerFor(user, 'java-id', 'Java', 'history q2', { level: 'Entry-level' });
+  await answerFor(user, 'py-id', 'Python', 'history q3', { level: 'Expert', isIdk: true });
+  await answerFor(user, 'py-id', 'Python', 'history q3', { level: 'Expert', isRetry: true }); // not recorded
+
+  const { skills } = await (await call('GET', '/api/skills/history', { token: user })).json();
+  assert.deepEqual(skills.map((s) => [s.id, s.name]), [['py-id', 'Python'], ['java-id', 'Java']]); // most recent first
+  assert.deepEqual(skills[0].answers, [['correct', 'Mid-level'], ['idk', 'Expert']]);                // in order, retry left out
+  assert.deepEqual(skills[1].answers, [['correct', 'Entry-level']]);
+
+  assert.deepEqual((await (await call('GET', '/api/skills/history', { token: 'nobody-here@example.test' })).json()).skills, []);
+  assert.equal((await call('GET', '/api/skills/history')).status, 401);
+});
+
+test('deleting a skill removes its history, so it is not brought back, and leaves everything else', async () => {
+  const user = 'deleter@example.test';
+  const other = 'bystander@example.test';
+  await answerFor(user, 'del-id', 'Rust', 'delete q1');
+  await answerFor(user, 'keep-id', 'Go', 'delete q2');
+  await answerFor(other, 'del-id', 'Rust', 'delete q3'); // someone else with the same skill id
+
+  assert.equal((await call('DELETE', '/api/skills/del-id')).status, 401);
+  assert.equal((await call('DELETE', '/api/skills/del-id', { token: user })).status, 204);
+
+  const mine = await (await call('GET', '/api/skills/history', { token: user })).json();
+  assert.deepEqual(mine.skills.map((s) => s.id), ['keep-id']);
+  const theirs = await (await call('GET', '/api/skills/history', { token: other })).json();
+  assert.deepEqual(theirs.skills.map((s) => s.id), ['del-id']);
+  // deleting something that is not there is not an error
+  assert.equal((await call('DELETE', '/api/skills/never-existed', { token: user })).status, 204);
+
+  // questions saved for later for that skill go too
+  await call('GET', '/api/quota', { token: user });
+  const q = { skillId: 'keep-id', level: 'Mid-level', text: 'left over' };
+  await call('POST', '/api/session/save-on-exit', { token: user, json: { unansweredQuestions: [q, { ...q, skillId: 'del-id' }] } });
+  await call('DELETE', '/api/skills/del-id', { token: user });
+  const pool = require('../server/db');
+  const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [user]);
+  assert.deepEqual(Object.keys(JSON.parse(rows[0].unanswered_questions)), ['keep-id']);
+});

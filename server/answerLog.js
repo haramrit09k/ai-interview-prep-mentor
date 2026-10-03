@@ -69,4 +69,9 @@ async function deleteAnswers(userId) {
   await db.query('DELETE FROM answer_log WHERE user_id = $1', [userId]);
 }
 
-module.exports = { insertAnswer, listAnswers, listAnswersForSkill, recentQuestions, deleteAnswers };
+/** Removes every recorded answer for one skill, which is what deleting a skill in the app promises. */
+async function deleteAnswersForSkill(userId, skillId) {
+  await db.query('DELETE FROM answer_log WHERE user_id = $1 AND skill_id = $2', [userId, clip(skillId, 100)]);
+}
+
+module.exports = { insertAnswer, listAnswers, listAnswersForSkill, recentQuestions, deleteAnswers, deleteAnswersForSkill };

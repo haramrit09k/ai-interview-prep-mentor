@@ -7,8 +7,8 @@ const { authMiddleware } = require('./auth');
 const { authOptionalMiddleware } = require('./authOptional');
 const { generateQuestionsForSkill, evaluateAnswer, transcribeAudio } = require('./geminiService');
 const { analyzeDelivery, sanitizeDelivery } = require('./deliveryStats');
-const { computeInsights, computeSkillReview } = require('./insights');
-const { insertAnswer, listAnswers, listAnswersForSkill, recentQuestions, deleteAnswers } = require('./answerLog');
+const { computeInsights, computeSkillReview, computeSkillHistory } = require('./insights');
+const { insertAnswer, listAnswers, listAnswersForSkill, recentQuestions, deleteAnswers, deleteAnswersForSkill } = require('./answerLog');
 const { LIMITS, LEVELS, cleanBlock } = require('./prompts');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
@@ -359,6 +359,36 @@ app.post('/api/transcribe', authMiddleware, rateLimiter, express.raw({ type: 'au
   } catch (error) {
     logger.error('Error in /api/transcribe:', error);
     res.status(502).json({ error: 'Transcription is unavailable right now. You can type your answer instead.' });
+  }
+});
+
+// Skills are kept in the browser, but every answer is recorded here, so a new browser can rebuild the list.
+app.get('/api/skills/history', authMiddleware, async (req, res) => {
+  try {
+    res.json({ skills: computeSkillHistory(await listAnswers(req.userId)) });
+  } catch (err) {
+    logger.error(`GET /api/skills/history: Error for user ${req.userId}:`, err.message);
+    res.status(500).json({ error: 'Could not load your skills.' });
+  }
+});
+
+// Deleting a skill in the app says it deletes the skill's history too. Without this the history would stay
+// here and the skill would come back the next time the list is rebuilt.
+app.delete('/api/skills/:skillId', authMiddleware, async (req, res) => {
+  try {
+    await deleteAnswersForSkill(req.userId, req.params.skillId);
+    const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
+    if (rows.length > 0 && rows[0].unanswered_questions) {
+      const saved = JSON.parse(rows[0].unanswered_questions);
+      if (saved[req.params.skillId]) {
+        delete saved[req.params.skillId];
+        await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(saved), req.userId]);
+      }
+    }
+    res.status(204).end();
+  } catch (err) {
+    logger.error(`DELETE /api/skills: Error for user ${req.userId}:`, err.message);
+    res.status(500).json({ error: 'Could not delete the skill history.' });
   }
 });
 

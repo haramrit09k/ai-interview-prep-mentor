@@ -23,7 +23,8 @@ import ProgressModal from './components/ProgressModal';
 import RedeemCodeModal from './components/RedeemCodeModal';
 import { codeFromAddress, clearCodeFromAddress } from './services/invites';
 import Footer from './components/Footer';
-import { fetchInsights } from './services/progress';
+import { fetchInsights, fetchSkillHistory, deleteSkillHistory } from './services/progress';
+import { skillsFromHistory } from './utils/restoreSkills';
 import { GUEST_MAX_QUESTIONS, defaultQuestionCount, recommendedLevel } from './utils/practiceDefaults';
 
 
@@ -216,8 +217,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     if (window.confirm('Are you sure you want to delete this skill and all associated questions and history?')) {
       setSkills(prev => prev.filter(skill => skill.id !== id));
       setCustomQuestions(prev => prev.filter(q => q.skillId !== id));
+      // The history lives on the server, so it has to be removed there too or the skill would come back.
+      if (isAuthenticated) {
+        deleteSkillHistory(id).catch(error => logger.error('Could not delete the skill history:', error));
+      }
     }
-  }, [setSkills, setCustomQuestions]);
+  }, [setSkills, setCustomQuestions, isAuthenticated]);
   
   const addCustomQuestion = (skillId: string, text: string, answer: string) => {
     const newQuestion: Question = { id: uuidv4(), skillId, text, answer, source: 'custom' };
@@ -494,6 +499,41 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       alert('An error occurred while trying to initiate payment.');
     }
   }, [isAuthenticated]);
+
+  const skillsRef = useRef(skills);
+  skillsRef.current = skills;
+
+  // A new browser (or cleared site data) has no skills list, but the server still has every answer. On the
+  // first sign in in such a browser, rebuild the list from that history. It only runs when this browser has
+  // no skills for this account, and only once, so skills you delete later stay deleted.
+  useEffect(() => {
+    if (!isAuthenticated || !userProfile) return;
+    const doneKey = `interview_prep_skills_restored_${userProfile.id}`;
+    let cancelled = false;
+    try {
+      if (localStorage.getItem(doneKey)) return;
+      const saved = JSON.parse(localStorage.getItem(`interview_prep_skills_${userProfile.id}`) || '[]');
+      if (Array.isArray(saved) && saved.length > 0) {
+        localStorage.setItem(doneKey, '1'); // this browser already has its skills
+        return;
+      }
+    } catch {
+      return; // storage is not available, so there is nothing to restore into
+    }
+    fetchSkillHistory()
+      .then(history => {
+        if (cancelled) return;
+        // Work out what to add from the skills as they are now, then add them without touching anything else.
+        const restored = skillsFromHistory(history, skillsRef.current, SKILLS_LIMIT_AUTH);
+        if (restored.length > 0) {
+          setSkills(prev => [...prev, ...restored.filter(r => !prev.some(p => p.id === r.id))]);
+          setToastMessage(`Restored ${restored.length} ${restored.length === 1 ? 'skill' : 'skills'} from your practice history.`);
+        }
+        try { localStorage.setItem(doneKey, '1'); } catch { /* it will simply run again next time */ }
+      })
+      .catch(error => logger.warn('Could not restore skills from history:', error)); // tries again next time
+    return () => { cancelled = true; };
+  }, [isAuthenticated, userProfile?.id]);
 
   const isOnHome = practiceSession === null;
   useEffect(() => {
