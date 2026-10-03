@@ -5,7 +5,10 @@ const path = require('path');
 const pool = require('./db');
 const { authMiddleware } = require('./auth');
 const { authOptionalMiddleware } = require('./authOptional');
-const { generateQuestionsForSkill, evaluateAnswer } = require('./geminiService');
+const { generateQuestionsForSkill, evaluateAnswer, transcribeAudio } = require('./geminiService');
+const { analyzeDelivery, sanitizeDelivery } = require('./deliveryStats');
+const { computeInsights } = require('./insights');
+const { insertAnswer, listAnswers, deleteAnswers } = require('./answerLog');
 const { generateRevisionSummary } = require('./summaryService');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
@@ -203,7 +206,7 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
 
 
 app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, async (req, res) => {
-  const { questionText, userAnswer } = req.body;
+  const { questionText, userAnswer, skillId, skillName, isIdk, delivery } = req.body;
 
   if (typeof questionText !== 'string' || !questionText.trim() || typeof userAnswer !== 'string') {
     return res.status(400).json({ error: 'Missing questionText or userAnswer' });
@@ -213,25 +216,95 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
     // Create a hash of the user's answer to use in the cache key
     const answerHash = crypto.createHash('sha256').update(userAnswer).digest('hex');
     const cacheKey = `evaluation:${questionText}:${answerHash}`;
+    let evaluation;
     const cachedEvaluation = await redisClient.get(cacheKey);
 
     if (cachedEvaluation) {
       logger.info(`Cache hit for evaluation: ${cacheKey}`);
-      return res.json(JSON.parse(cachedEvaluation));
+      evaluation = JSON.parse(cachedEvaluation);
+    } else {
+      logger.info(`Cache miss for evaluation: ${cacheKey}`);
+      evaluation = await evaluateAnswer(questionText, userAnswer);
+      await redisClient.set(cacheKey, JSON.stringify(evaluation), { EX: 604800 }); // Cache for 7 days
+      logger.info(`Cached evaluation for key: ${cacheKey}`);
     }
 
-    logger.info(`Cache miss for evaluation: ${cacheKey}`);
-
-    const evaluation = await evaluateAnswer(questionText, userAnswer);
-
-    await redisClient.set(cacheKey, JSON.stringify(evaluation), { EX: 604800 }); // Cache for 7 days
-    logger.info(`Cached evaluation for key: ${cacheKey}`);
+    // Signed-in users get the answer recorded so progress insights can be built from it.
+    // A logging failure must never cost the user the evaluation they already waited for.
+    if (req.userId && typeof skillId === 'string' && typeof skillName === 'string') {
+      try {
+        await insertAnswer({
+          userId: req.userId,
+          skillId,
+          skillName,
+          questionText,
+          outcome: isIdk === true ? 'idk' : evaluation.classification,
+          conceptsKnown: evaluation.conceptsKnown,
+          conceptsToReview: evaluation.conceptsToReview,
+          delivery: sanitizeDelivery(delivery),
+        });
+      } catch (logErr) {
+        logger.error(`Could not record answer for user ${req.userId}:`, logErr.message);
+      }
+    }
 
     res.json(evaluation);
   } catch (error) {
     // Nothing was cached above, so a transient Gemini failure is not remembered.
     logger.error('Error in /api/evaluate:', error);
     res.status(502).json({ error: 'The AI mentor is unavailable right now. Please try again in a moment.' });
+  }
+});
+
+// Spoken answers. Audio is the most expensive request we accept, so it needs a signed-in user,
+// has a small size cap, and is never stored: it is sent to Gemini for transcription and dropped.
+const ALLOWED_AUDIO_TYPES = new Set(['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/x-m4a']);
+
+app.post('/api/transcribe', authMiddleware, rateLimiter, express.raw({ type: 'audio/*', limit: '5mb' }), async (req, res) => {
+  const mimeType = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (!ALLOWED_AUDIO_TYPES.has(mimeType)) {
+    return res.status(415).json({ error: 'Unsupported audio format.' });
+  }
+  if (!Buffer.isBuffer(req.body) || req.body.length < 1000) {
+    return res.status(400).json({ error: 'The recording was empty. Please try again.' });
+  }
+  const durationMs = parseInt(req.headers['x-audio-duration-ms'], 10);
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    return res.status(400).json({ error: 'Missing recording length.' });
+  }
+
+  try {
+    const transcript = await transcribeAudio(req.body, mimeType);
+    if (!transcript) {
+      return res.status(422).json({ error: 'We could not hear any speech. Check your microphone and try again.' });
+    }
+    res.json({ transcript, delivery: analyzeDelivery(transcript, durationMs) });
+  } catch (error) {
+    logger.error('Error in /api/transcribe:', error);
+    res.status(502).json({ error: 'Transcription is unavailable right now. You can type your answer instead.' });
+  }
+});
+
+app.get('/api/insights', authMiddleware, async (req, res) => {
+  const offset = parseInt(req.query.tzOffset, 10);
+  const tzOffsetMinutes = Number.isFinite(offset) ? Math.max(-840, Math.min(840, offset)) : 0;
+  try {
+    const rows = await listAnswers(req.userId);
+    res.json(computeInsights(rows, { tzOffsetMinutes }));
+  } catch (err) {
+    logger.error(`GET /api/insights: Error for user ${req.userId}:`, err.message);
+    res.status(500).json({ error: 'Could not load your progress.' });
+  }
+});
+
+// Lets people erase their own practice history.
+app.delete('/api/insights', authMiddleware, async (req, res) => {
+  try {
+    await deleteAnswers(req.userId);
+    res.status(204).end();
+  } catch (err) {
+    logger.error(`DELETE /api/insights: Error for user ${req.userId}:`, err.message);
+    res.status(500).json({ error: 'Could not delete your progress data.' });
   }
 });
 
@@ -489,6 +562,11 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: err.status && err.status < 500 ? err.message : 'Server Error' });
 });
 
-app.listen(PORT, () => {
-  logger.info(`Server listening on port ${PORT}`);
-});
+// Only start listening when run directly (npm start / Heroku). Tests import the app instead.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    logger.info(`Server listening on port ${PORT}`);
+  });
+}
+
+module.exports = app;

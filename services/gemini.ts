@@ -1,11 +1,19 @@
 import logger from '../src/logger';
-import type { EvaluationResponse } from '../types';
+import type { DeliveryStats, EvaluationResponse } from '../types';
+
+/** Extra context that lets the server record the answer for progress insights. */
+export interface EvaluationMeta {
+  skillId?: string;
+  skillName?: string;
+  isIdk?: boolean;
+  delivery?: DeliveryStats | null;
+}
 
 // All Gemini calls happen on the server (see server/geminiService.js).
 // The API key must never be bundled into client code.
 
 /** Resolves with the evaluation, or throws if the backend could not produce one. */
-export const evaluateAnswer = async (questionText: string, userAnswer: string): Promise<EvaluationResponse> => {
+export const evaluateAnswer = async (questionText: string, userAnswer: string, meta: EvaluationMeta = {}): Promise<EvaluationResponse> => {
   logger.debug('Sending evaluation request to backend for question:', questionText);
 
   // The backend accepts guests too, so the token is optional.
@@ -18,7 +26,7 @@ export const evaluateAnswer = async (questionText: string, userAnswer: string): 
   const response = await fetch('/api/evaluate', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ questionText, userAnswer }),
+    body: JSON.stringify({ questionText, userAnswer, ...meta }),
   });
 
   if (!response.ok) {

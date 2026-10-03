@@ -185,7 +185,38 @@ const evaluateAnswer = async (questionText, userAnswer) => {
   }
 };
 
+/**
+ * Transcribes a spoken answer. The transcript is kept verbatim (fillers and repeats included)
+ * because delivery coaching counts them.
+ */
+const transcribeAudio = async (audioBuffer, mimeType) => {
+  const prompt = `Transcribe this audio exactly as spoken, word for word. Keep filler words (um, uh, like, you know), repeated words and false starts exactly as they were said. Do not correct grammar, rephrase or summarise. Use basic punctuation only. If there is no intelligible speech, return an empty transcript. Return JSON with one key, "transcript".`;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: [
+      { inlineData: { mimeType, data: audioBuffer.toString('base64') } },
+      { text: prompt },
+    ],
+    config: {
+      responseMimeType: "application/json",
+      maxOutputTokens: 4096,
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: { transcript: { type: Type.STRING } },
+        required: ["transcript"],
+      },
+    },
+  });
+
+  const jsonStr = cleanJsonString(response.text ?? "");
+  if (!jsonStr) throw new Error("Received empty response from transcription API");
+  const result = JSON.parse(jsonStr);
+  return typeof result.transcript === 'string' ? result.transcript.trim() : '';
+};
+
 module.exports = {
   generateQuestionsForSkill,
   evaluateAnswer,
+  transcribeAudio,
 };

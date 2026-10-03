@@ -18,6 +18,7 @@ import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import logger from './src/logger'; // Import the logger
 import { readErrorMessage } from './services/gemini';
+import ProgressModal from './components/ProgressModal';
 import Footer from './components/Footer';
 
 
@@ -83,6 +84,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [isProgressOpen, setIsProgressOpen] = useState(false);
   
   const [authQuota, setAuthQuota] = useState<AuthQuota>({ questionsUsed: 0, lastResetDate: new Date().toISOString().split('T')[0] });
 
@@ -132,7 +134,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   
   // --- DERIVED STATE FOR UI ---
   const questionsRemaining = isAuthenticated ? QUESTIONS_LIMIT_AUTH - authQuota.questionsUsed : 0;
-  const nextResetDate = isAuthenticated ? new Date(new Date(authQuota.lastResetDate).getTime() + 24 * 60 * 60 * 1000).toLocaleDateString() : null;
+  const nextResetDate = isAuthenticated ? new Date(new Date(authQuota.lastResetDate).getTime() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString() : null;
   const sessionsRemaining = isAuthenticated ? Infinity : SESSIONS_LIMIT_ANON - anonSessionsUsed;
   const isSkillLimitReached = isAuthenticated 
     ? skills.length >= SKILLS_LIMIT_AUTH
@@ -522,7 +524,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   }, [isAuthenticated]);
 
   if (practiceSession) {
-    return <PracticeView session={practiceSession} onEndSession={endPracticeSession} onNavigate={navigateQuestion} onQuestionComplete={handleQuestionComplete} questionsRemaining={questionsRemaining} />;
+    return <PracticeView session={practiceSession} onEndSession={endPracticeSession} onNavigate={navigateQuestion} onQuestionComplete={handleQuestionComplete} questionsRemaining={questionsRemaining} isAuthenticated={isAuthenticated} />;
   }
 
   return (
@@ -537,6 +539,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         nextResetDate={nextResetDate}
         onPurchaseQuestions={handlePurchaseQuestions}
         onOpenWelcomeModal={() => setIsWelcomeModalOpen(true)}
+        onOpenProgress={() => setIsProgressOpen(true)}
         setShowPurchaseModal={setShowPurchaseModal}
       />
       {isStartingSession && (
@@ -621,6 +624,9 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             setHasSeenWelcomeModal(true);
           }
         }} />
+      )}
+      {isProgressOpen && isAuthenticated && (
+        <ProgressModal onClose={() => setIsProgressOpen(false)} />
       )}
       {toastMessage && (
         <ToastNotification message={toastMessage} onClose={() => setToastMessage(null)} />
