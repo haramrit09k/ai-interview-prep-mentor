@@ -1,5 +1,6 @@
 const { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } = require("@google/genai");
 const logger = require('./logger');
+const { buildQuestionsPrompt, buildEvaluationPrompt, TRANSCRIPTION_PROMPT } = require('./prompts');
 
 const API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
 
@@ -30,45 +31,10 @@ const cleanJsonString = (str) => {
   return cleaned.trim();
 };
 
-const generateQuestionsForSkill = async (skillName, level, count, skillId) => {
+const generateQuestionsForSkill = async (skillName, level, count, skillId, avoidQuestions = []) => {
   logger.debug('Generating questions for skill:', { skillName, level, count, skillId });
   try {
-    let levelSpecificInstructions = '';
-
-    switch (level) {
-      case 'Entry-level':
-        levelSpecificInstructions = `
-          The user is a beginner. Ask fundamental, definition-based questions.
-          - Focus on core concepts, syntax, and basic principles.
-          - For a topic like 'Java', examples would be "What are the core principles of OOP?", "What is the difference between == and equals()?", or "What are checked vs. unchecked exceptions?".
-          - The questions should be straightforward and test foundational knowledge. Avoid complex, multi-part scenarios.
-        `;
-        break;
-      case 'Mid-level':
-        levelSpecificInstructions = `
-          The user has some industry experience. Ask practical questions that require applying concepts.
-          - Focus on use cases, comparisons between technologies, and simple problem-solving or code analysis.
-          - For a topic like 'Java', examples would be "When would you prefer using a LinkedList over an ArrayList and why?", "How would you ensure a method is thread-safe?", or asking them to find a bug in a small code snippet.
-          - The questions should bridge the gap between pure definition and complex design.
-        `;
-        break;
-      case 'Expert':
-        levelSpecificInstructions = `
-          The user is a seasoned expert. Ask advanced, real-world, and scenario-based questions.
-          - Focus on system design, architecture, performance trade-offs, and handling complex problems at scale.
-          - For a topic like 'Java', an example would be "Imagine you need to fetch data from multiple web APIs concurrently. How would you approach this using basic concurrency features?".
-          - The questions should test deep knowledge and experience.
-        `;
-        break;
-    }
-    
-    const contents = `You are an expert interviewer with a mentoring approach. Your goal is to help an engineer prepare for an interview for the topic: "${skillName}".
-
-Generate exactly ${count} interview questions appropriate for a candidate at the "${level}" experience level.
-
-Follow these specific instructions for the experience level:
-${levelSpecificInstructions}
-`;
+    const contents = buildQuestionsPrompt(skillName, level, count, avoidQuestions);
 
     const response = await ai.models.generateContent({
       model: model,
@@ -125,13 +91,8 @@ ${levelSpecificInstructions}
 const evaluateAnswer = async (questionText, userAnswer) => {
   logger.debug('Evaluating answer for question:', questionText);
   try {
-      // Truncate userAnswer to prevent excessively long inputs
-      const MAX_USER_ANSWER_LENGTH = 5000; // Approximately 1000 words
-      const truncatedUserAnswer = userAnswer.length > MAX_USER_ANSWER_LENGTH 
-          ? userAnswer.substring(0, MAX_USER_ANSWER_LENGTH) 
-          : userAnswer;
-
-      const prompt = `You are an expert interview mentor. A user is practicing for an interview.\nHere is the question they were asked, and the answer they provided.\n\nQuestion:\n---\n${questionText}\n---\n\nUser's Answer:\n---\n${truncatedUserAnswer}\n---\n\nYour tasks are:\n1. First, provide an ideal, concise answer to the question. Be brief and to the point. Use markdown for formatting and include code examples only if essential.\n2. Second, evaluate the user's answer. Provide concise, constructive feedback. Focus on the most important points for improvement. Use markdown.\n3. Third, classify the user's answer as 'correct', 'partially_correct', or 'incorrect'.\n4. Fourth, identify specific technical concepts or keywords that the user demonstrated understanding of in their answer. List them as an array of strings. If no concepts were demonstrated, return an empty array.\n5. Fifth, identify specific technical concepts or keywords related to the question that the user missed, misunderstood, or should review. List them as an array of strings. If no concepts were missed, return an empty array.\n\nReturn a JSON object with five keys:\n- "mentorAnswer": The ideal, concise answer (string, markdown formatted).\n- "feedback": Your concise, constructive feedback for the user (string, markdown formatted).\n- "classification": Your classification ('correct', 'partially_correct', 'incorrect').\n- "conceptsKnown": An array of strings, listing concepts the user demonstrated understanding of.\n- "conceptsToReview": An array of strings, listing concepts the user missed or should review.`;
+      // The prompt builder trims and caps the answer (LIMITS.ANSWER), so it is passed through as is.
+      const prompt = buildEvaluationPrompt(questionText, userAnswer);
 
       const response = await ai.models.generateContent({
           model: model,
@@ -172,11 +133,18 @@ const evaluateAnswer = async (questionText, userAnswer) => {
           !validClassifications.includes(result.classification)) {
         throw new Error("Evaluation response was not in the expected format");
       }
-      return {
+      const evaluation = {
         ...result,
         conceptsKnown: Array.isArray(result.conceptsKnown) ? result.conceptsKnown : [],
         conceptsToReview: Array.isArray(result.conceptsToReview) ? result.conceptsToReview : [],
       };
+      // No answer means nothing was demonstrated. The prompt asks for this, and we enforce it here
+      // so a model slip can never turn "I don't know" into credit.
+      if (!String(userAnswer ?? '').trim()) {
+        evaluation.classification = 'incorrect';
+        evaluation.conceptsKnown = [];
+      }
+      return evaluation;
   } catch (error) {
       // Let the route decide how to respond. Returning a fake "incorrect" result here
       // would hide outages, charge the user quota and get cached as if it were real.
@@ -190,7 +158,7 @@ const evaluateAnswer = async (questionText, userAnswer) => {
  * because delivery coaching counts them.
  */
 const transcribeAudio = async (audioBuffer, mimeType) => {
-  const prompt = `Transcribe this audio exactly as spoken, word for word. Keep filler words (um, uh, like, you know), repeated words and false starts exactly as they were said. Do not correct grammar, rephrase or summarise. Use basic punctuation only. If there is no intelligible speech, return an empty transcript. Return JSON with one key, "transcript".`;
+  const prompt = TRANSCRIPTION_PROMPT;
 
   const response = await ai.models.generateContent({
     model,

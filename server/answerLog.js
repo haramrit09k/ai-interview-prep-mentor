@@ -39,8 +39,22 @@ async function listAnswers(userId) {
   return rows.reverse();
 }
 
+/**
+ * The user's most recently answered questions for one skill, newest first, without duplicates.
+ * Used to tell the model what not to ask again. Kept small on purpose: a few dozen rows read,
+ * at most `limit` short strings returned.
+ */
+async function recentQuestions(userId, skillId, limit = 10) {
+  const wanted = Math.max(1, Math.min(Math.floor(Number(limit)) || 10, 50));
+  const { rows } = await db.query(
+    'SELECT question_text FROM answer_log WHERE user_id = $1 AND skill_id = $2 ORDER BY answered_at DESC LIMIT ' + wanted * 3,
+    [userId, skillId]
+  );
+  return [...new Set(rows.map((r) => r.question_text))].slice(0, wanted);
+}
+
 async function deleteAnswers(userId) {
   await db.query('DELETE FROM answer_log WHERE user_id = $1', [userId]);
 }
 
-module.exports = { insertAnswer, listAnswers, deleteAnswers };
+module.exports = { insertAnswer, listAnswers, recentQuestions, deleteAnswers };

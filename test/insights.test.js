@@ -119,3 +119,32 @@ test('tolerates malformed concept JSON', () => {
   const result = computeInsights([row({ concepts_known: 'not json', concepts_to_review: null })], { now: NOW });
   assert.deepEqual(result.gaps, []);
 });
+
+test('the same concept written differently is counted as one gap', () => {
+  const variants = ['Garbage Collection', 'garbage collection (GC)', 'The Garbage-Collection!', 'Garbage  Collection.'];
+  const rows = variants.map((v, i) => row({ concepts_to_review: JSON.stringify([v]), answered_at: daysAgo(4 - i) }));
+  const { gaps } = computeInsights(rows, { now: NOW });
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].timesMissed, 4);
+});
+
+test('ampersands, slashes and hyphens match their spelled-out forms', () => {
+  const rows = [
+    row({ concepts_to_review: '["Read & Write Locks"]', answered_at: daysAgo(3) }),
+    row({ concepts_to_review: '["read and write locks"]', answered_at: daysAgo(2) }),
+    row({ concepts_known: '["Read-Write Locks"]', answered_at: daysAgo(1) }),
+  ];
+  // "Read-Write Locks" is a different concept than "read and write locks", so it does not resolve the gap
+  const { gaps } = computeInsights(rows, { now: NOW });
+  assert.equal(gaps[0].timesMissed, 2);
+});
+
+test('c++ and c# are not collapsed into "c"', () => {
+  const rows = [
+    row({ concepts_to_review: '["C++"]', answered_at: daysAgo(2) }),
+    row({ concepts_known: '["C"]', answered_at: daysAgo(1) }),
+  ];
+  const { gaps, mastered } = computeInsights(rows, { now: NOW });
+  assert.equal(gaps.length, 1);
+  assert.equal(mastered.length, 0);
+});

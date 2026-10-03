@@ -49,6 +49,18 @@
         },
       }
     </script>
+    <style>
+      /* Inline code (including converted complexity like O(n log n)): no literal backticks, subtle chip. */
+      .prose :not(pre) > code::before,
+      .prose :not(pre) > code::after { content: none; }
+      .prose :not(pre) > code {
+        background: #111827;
+        padding: 0.1rem 0.35rem;
+        border-radius: 0.25rem;
+        font-size: 0.9em;
+        font-weight: 600;
+      }
+    </style>
 </head>
   <body class="bg-background-dark">
     <div id="root"></div>

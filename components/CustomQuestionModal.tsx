@@ -63,6 +63,7 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ skills, onClo
                 id="question"
                 rows={3}
                 value={question}
+                maxLength={600}
                 onChange={(e) => setQuestion(e.target.value)}
                 placeholder="e.g., Explain the difference between useEffect and useLayoutEffect."
                 className="w-full bg-background-light border border-gray-600 text-text-primary rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition p-2 sm:p-3 text-sm sm:text-base"

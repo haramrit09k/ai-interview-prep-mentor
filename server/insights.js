@@ -18,8 +18,19 @@ const parseList = (value) => {
   }
 };
 
+// Matches the same idea written slightly differently: case, punctuation, "(GC)" asides, "&" versus "and".
 const normalizeConcept = (concept) =>
-  typeof concept === 'string' ? concept.trim().toLowerCase().replace(/\s+/g, ' ') : '';
+  typeof concept === 'string'
+    ? concept
+        .toLowerCase()
+        .replace(/\([^)]*\)/g, ' ') // "Garbage Collection (GC)" -> "garbage collection"
+        .replace(/&/g, ' and ')
+        .replace(/[-_/]+/g, ' ')
+        .replace(/[^\p{L}\p{N}+# ]+/gu, ' ') // keep c++ and c# intact
+        .replace(/^(?:the|a|an)\s+/, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    : '';
 
 const percent = (fraction) => Math.round(fraction * 100);
 const average = (numbers) => (numbers.length ? numbers.reduce((a, b) => a + b, 0) / numbers.length : null);
