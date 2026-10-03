@@ -24,7 +24,7 @@ import RedeemCodeModal from './components/RedeemCodeModal';
 import { codeFromAddress, clearCodeFromAddress } from './services/invites';
 import Footer from './components/Footer';
 import { fetchInsights, fetchSkillHistory, deleteSkillHistory } from './services/progress';
-import { skillsFromHistory } from './utils/restoreSkills';
+import { skillsFromHistory, skillsFromGuest } from './utils/restoreSkills';
 import { GUEST_MAX_QUESTIONS, defaultQuestionCount, recommendedLevel } from './utils/practiceDefaults';
 
 
@@ -503,33 +503,64 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const skillsRef = useRef(skills);
   skillsRef.current = skills;
 
-  // A new browser (or cleared site data) has no skills list, but the server still has every answer. On the
-  // first sign in in such a browser, rebuild the list from that history. It only runs when this browser has
-  // no skills for this account, and only once, so skills you delete later stay deleted.
+  // On the first sign in in a browser that has no skills for the account (a new device, cleared site data, or a
+  // guest who has just signed in) the skills list is filled in two ways:
+  //   1. skills the person built up as a guest in this browser come across, with their custom questions
+  //   2. skills they have practised before are rebuilt from the answers the server has on record
+  // It only runs while this browser's list for the account is empty (or a previous attempt did not finish), and
+  // once it has finished it never runs again, so skills you delete later stay deleted.
   useEffect(() => {
     if (!isAuthenticated || !userProfile) return;
     const doneKey = `interview_prep_skills_restored_${userProfile.id}`;
+    const pendingKey = `interview_prep_skills_restore_pending_${userProfile.id}`;
     let cancelled = false;
+    let carriedSkills: Skill[] = []; // what step 1 added, so step 2 does not depend on when React next renders
     try {
       if (localStorage.getItem(doneKey)) return;
       const saved = JSON.parse(localStorage.getItem(`interview_prep_skills_${userProfile.id}`) || '[]');
-      if (Array.isArray(saved) && saved.length > 0) {
+      const hasSkills = Array.isArray(saved) && saved.length > 0;
+      if (hasSkills && !localStorage.getItem(pendingKey)) {
         localStorage.setItem(doneKey, '1'); // this browser already has its skills
         return;
+      }
+      localStorage.setItem(pendingKey, '1');
+
+      // 1. Skills from guest mode in this browser. The guest data is only removed once everything has finished,
+      // and this step skips what is already there, so running it again (a retry, or React running the effect
+      // twice in development) is safe. After that it is gone, so it cannot be handed to a different account.
+      const carried = skillsFromGuest(
+        JSON.parse(localStorage.getItem('interview_prep_skills__anon') || '[]'),
+        JSON.parse(localStorage.getItem('interview_prep_custom_questions__anon') || '[]'),
+        hasSkills ? saved : [],
+        SKILLS_LIMIT_AUTH,
+      );
+      carriedSkills = carried.skills;
+      if (carried.skills.length > 0) {
+        setSkills(prev => [...prev, ...carried.skills.filter(c => !prev.some(p => p.id === c.id || p.name.toLowerCase() === c.name.toLowerCase()))]);
+        setCustomQuestions(prev => [...prev, ...carried.questions.filter(c => !prev.some(p => p.id === c.id))]);
+        setToastMessage(`Your ${carried.skills.length === 1 ? 'skill was' : 'skills were'} added to your account.`);
       }
     } catch {
       return; // storage is not available, so there is nothing to restore into
     }
+
+    // 2. Skills from practice history, added to whatever is there now.
     fetchSkillHistory()
       .then(history => {
         if (cancelled) return;
-        // Work out what to add from the skills as they are now, then add them without touching anything else.
-        const restored = skillsFromHistory(history, skillsRef.current, SKILLS_LIMIT_AUTH);
+        const current = skillsRef.current;
+        const existing = [...current, ...carriedSkills.filter(c => !current.some(p => p.id === c.id))];
+        const restored = skillsFromHistory(history, existing, SKILLS_LIMIT_AUTH);
         if (restored.length > 0) {
-          setSkills(prev => [...prev, ...restored.filter(r => !prev.some(p => p.id === r.id))]);
+          setSkills(prev => [...prev, ...restored.filter(r => !prev.some(p => p.id === r.id || p.name.toLowerCase() === r.name.toLowerCase()))]);
           setToastMessage(`Restored ${restored.length} ${restored.length === 1 ? 'skill' : 'skills'} from your practice history.`);
         }
-        try { localStorage.setItem(doneKey, '1'); } catch { /* it will simply run again next time */ }
+        try {
+          localStorage.setItem(doneKey, '1');
+          localStorage.removeItem(pendingKey);
+          localStorage.removeItem('interview_prep_skills__anon');
+          localStorage.removeItem('interview_prep_custom_questions__anon');
+        } catch { /* it will simply run again next time */ }
       })
       .catch(error => logger.warn('Could not restore skills from history:', error)); // tries again next time
     return () => { cancelled = true; };

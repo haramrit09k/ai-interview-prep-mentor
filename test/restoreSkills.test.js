@@ -56,3 +56,32 @@ test('bad data from the server is skipped rather than breaking the list', () => 
   assert.equal(result[1].name.length, 60);
   assert.equal(result[1].rating, 0);
 });
+
+test('guest skills and their custom questions come across to the account', () => {
+  const guestSkills = [{ id: 'g1', name: 'Python', rating: 35 }, { id: 'g2', name: 'SQL', rating: 12.6 }];
+  const guestQuestions = [
+    { id: 'q1', skillId: 'g1', text: 'What is a decorator?', answer: 'A function wrapper', source: 'custom' },
+    { id: 'q2', skillId: 'g2', text: 'What is a join?', source: 'custom' },
+    { id: 'q3', skillId: 'not-kept', text: 'Orphan', source: 'custom' },
+  ];
+  const { skills, questions } = restore.skillsFromGuest(guestSkills, guestQuestions, [], 5);
+  assert.deepEqual(skills, [{ id: 'g1', name: 'Python', rating: 35 }, { id: 'g2', name: 'SQL', rating: 13 }]);
+  assert.deepEqual(questions.map((q) => q.id), ['q1', 'q2']); // the question for a skill that was not carried is dropped
+  assert.equal(questions[0].answer, 'A function wrapper');
+  assert.equal(questions[1].answer, undefined);
+});
+
+test('guest skills respect what the account already has and the skill limit', () => {
+  const existing = [{ id: 'a1', name: 'python', rating: 50 }];
+  const guestSkills = [{ id: 'g1', name: 'Python', rating: 35 }, { id: 'g2', name: 'SQL', rating: 10 }, { id: 'g3', name: 'Go', rating: 10 }];
+  const { skills, questions } = restore.skillsFromGuest(guestSkills, [{ id: 'q1', skillId: 'g1', text: 'x' }], existing, 2);
+  assert.deepEqual(skills.map((s) => s.id), ['g2']); // same name as an existing skill is skipped, and only one slot is left
+  assert.deepEqual(questions, []);
+});
+
+test('bad guest data is dropped and ratings are kept in range', () => {
+  const guestSkills = [null, { id: 1, name: 'x' }, { id: 'ok', name: '  Rust ', rating: 250 }, { id: 'neg', name: 'C', rating: -5 }, { id: 'nan', name: 'D', rating: 'high' }];
+  const { skills } = restore.skillsFromGuest(guestSkills, 'not an array', [], 10);
+  assert.deepEqual(skills, [{ id: 'ok', name: 'Rust', rating: 100 }, { id: 'neg', name: 'C', rating: 0 }, { id: 'nan', name: 'D', rating: 0 }]);
+  assert.deepEqual(restore.skillsFromGuest('nope', null, [], 5), { skills: [], questions: [] });
+});
