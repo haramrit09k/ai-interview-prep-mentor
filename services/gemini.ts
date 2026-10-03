@@ -6,6 +6,7 @@ export interface EvaluationMeta {
   skillId?: string;
   skillName?: string;
   isIdk?: boolean;
+  isRetry?: boolean; // a second go after seeing the mentor answer: graded, but not recorded
   level?: ExperienceLevel; // grading expectations rise with the level
   delivery?: DeliveryStats | null;
 }

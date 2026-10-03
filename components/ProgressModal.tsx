@@ -75,7 +75,7 @@ const ProgressModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       return (
         <div role="alert" className="space-y-3">
           <p className="text-red-200 bg-red-900/40 border border-red-500/50 rounded-lg p-3">{error}</p>
-          <button onClick={load} className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light focus-visible:ring-2 focus-visible:ring-white">Try again</button>
+          <button onClick={load} className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-white">Try again</button>
         </div>
       );
     }

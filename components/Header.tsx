@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { UserProfile } from '../types';
-import { LogoutIcon, QuestionMarkCircleIcon, Bars3Icon, ChartBarIcon } from './Icons';
+import { LogoutIcon, QuestionMarkCircleIcon, Bars3Icon, ChartBarIcon, FlameIcon } from './Icons';
 import { BrainIcon } from './BrainIcon';
 import { GoogleLogin } from '@react-oauth/google';
 
@@ -17,9 +17,10 @@ interface HeaderProps {
     onOpenProgress: () => void;
     setShowPurchaseModal: (show: boolean) => void;
     nextResetDate: string | null; // New prop for next reset date
+    streak: { current: number; practicedToday: boolean } | null; // null until progress has loaded
 }
 
-const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onOpenWelcomeModal, onOpenProgress, setShowPurchaseModal, nextResetDate }) => {
+const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onOpenWelcomeModal, onOpenProgress, setShowPurchaseModal, nextResetDate, streak }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
@@ -48,10 +49,22 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex items-center justify-between h-16">
                     <div className="flex items-center">
-                        <BrainIcon className="h-8 w-8 text-brand-primary" />
-                        <h1 className="text-base sm:text-lg font-bold text-text-primary ml-3 tracking-tight">ACE: AI Coach for Employment</h1>
+                        <BrainIcon className="h-8 w-8 text-brand-light" />
+                        <h1 className="ml-3 flex items-baseline gap-2">
+                            <span className="font-mono text-lg font-bold text-text-primary tracking-tight">ACE</span>
+                            <span className="hidden sm:inline text-sm text-text-muted">AI Coach for Employment</span>
+                        </h1>
                     </div>
                     <div className="flex items-center gap-2">
+                        {isAuthenticated && streak && streak.current > 0 && (
+                            <span
+                                className={`flex items-center gap-1 text-xs sm:text-sm font-mono font-bold ${streak.practicedToday ? 'text-brand-light' : 'text-text-muted'}`}
+                                title={streak.practicedToday ? 'You have practised today' : 'Answer one question today to keep your streak'}
+                            >
+                                <FlameIcon className="w-4 h-4" />
+                                {streak.current}<span className="sr-only"> day streak{streak.practicedToday ? '' : ', not yet extended today'}</span>
+                            </span>
+                        )}
                         {isAuthenticated &&
                             (questionsRemaining < 5 ? (
                                 <span className="text-xs sm:text-sm text-red-500 font-semibold text-right">
@@ -93,7 +106,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                             {isAuthenticated && (
                                 <button
                                     onClick={() => setShowPurchaseModal(true)}
-                                    className="px-4 py-2 bg-brand-primary text-white font-semibold rounded-lg hover:bg-brand-light transition-colors"
+                                    className="px-4 py-2 bg-brand-primary text-white font-semibold rounded-lg hover:bg-brand-hover transition-colors"
                                 >
                                     Buy Questions
                                 </button>
@@ -197,7 +210,7 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
                             )}
                             {isAuthenticated && (
                                 <button
-                                    className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light transition-colors text-sm w-full max-w-xs"
+                                    className="py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-hover transition-colors text-sm w-full max-w-xs"
                                     onClick={() => { setShowPurchaseModal(true); setIsMobileMenuOpen(false); }}
                                 >
                                     Buy Questions

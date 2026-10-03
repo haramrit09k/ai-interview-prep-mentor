@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import useLocalStorage from './hooks/useLocalStorage';
-import type { Skill, Question, AnswerOutcome, ExperienceLevel, ReviewQuestion, UserProfile } from './types';
+import type { Skill, Question, AnswerOutcome, ExperienceLevel, ReviewQuestion, UserProfile, Insights, RatingResult } from './types';
 
 import SkillManagement from './components/SkillManagement';
 import PracticeView from './components/PracticeView';
@@ -21,6 +21,8 @@ import logger from './src/logger'; // Import the logger
 import { readErrorMessage } from './services/gemini';
 import ProgressModal from './components/ProgressModal';
 import Footer from './components/Footer';
+import { fetchInsights } from './services/progress';
+import { defaultQuestionCount, recommendedLevel } from './utils/practiceDefaults';
 
 
 // Helper to shuffle array
@@ -70,14 +72,15 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   
   // --- STATE FOR QUOTA MANAGEMENT ---
   const [anonSessionsUsed, setAnonSessionsUsed] = useLocalStorage<number>('interview_prep_anon_sessions_used', 0);
-  const [hasSeenWelcomeModal, setHasSeenWelcomeModal] = useLocalStorage<boolean>('interview_prep_seen_welcome_modal', false);
-  const [hasSeenWelcomeModalAuth, setHasSeenWelcomeModalAuth] = useState<boolean | null>(null);
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [isProgressOpen, setIsProgressOpen] = useState(false);
   
   const [authQuota, setAuthQuota] = useState<AuthQuota>({ questionsUsed: 0, lastResetDate: new Date().toISOString().split('T')[0] });
+
+  // Streak and next step for the signed-in home screen. Refreshed each time a session ends.
+  const [insights, setInsights] = useState<Insights | null>(null);
 
   // Move handleAuthError to the top before it's used
   const handleAuthError = useCallback((logoutFn: () => void, message: string = 'Your session has expired. Please log in again.') => {
@@ -98,7 +101,6 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           if (response.ok) {
             const data = await response.json();
             setAuthQuota(data);
-            setHasSeenWelcomeModalAuth(data.hasSeenWelcomeModal);
           } else if (response.status === 401) {
             handleAuthError(handleLogout, 'Failed to fetch quota: Unauthorized.');
           } else {
@@ -178,27 +180,27 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     }
   }, [isAuthEnabled, setUserProfile]);
 
-  const addSkill = useCallback((name: string) => {
+  // Returns the new skill so callers (like the starter chips) can start practising it straight away.
+  const addSkill = useCallback((name: string): Skill | null => {
     if (isSkillLimitReached) {
        if (isAuthenticated) {
          alert(`You have reached the limit of ${SKILLS_LIMIT_AUTH} skills.`);
        } else {
          setLimitModal({ isOpen: true, reason: 'skills' });
        }
-       return;
+       return null;
     }
     const skillName = name.trim();
-    if (!skillName) return;
+    if (!skillName) return null;
 
-    setSkills(prevSkills => {
-      if (prevSkills.some(skill => skill.name.toLowerCase() === skillName.toLowerCase())) {
-        alert('This skill already exists.');
-        return prevSkills;
-      }
-      const newSkill: Skill = { id: uuidv4(), name: skillName, rating: 0 };
-      return [...prevSkills, newSkill];
-    });
-  }, [setSkills, isSkillLimitReached, isAuthenticated]);
+    if (skills.some(skill => skill.name.toLowerCase() === skillName.toLowerCase())) {
+      alert('This skill already exists.');
+      return null;
+    }
+    const newSkill: Skill = { id: uuidv4(), name: skillName, rating: 0 };
+    setSkills(prevSkills => [...prevSkills, newSkill]);
+    return newSkill;
+  }, [skills, setSkills, isSkillLimitReached, isAuthenticated]);
 
   const deleteSkill = useCallback((id: string) => {
     if (window.confirm('Are you sure you want to delete this skill and all associated questions and history?')) {
@@ -393,49 +395,72 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     });
   };
 
-  const handleQuestionComplete = useCallback(async ({ question, classification, conceptsKnown, conceptsToReview }: { question: Question, classification: AnswerOutcome, conceptsKnown?: string[], conceptsToReview?: string[] }) => {
-    console.log("App.tsx: handleQuestionComplete received:", { question, classification, conceptsKnown, conceptsToReview });
+  // Spends one question of the weekly quota. Fire and forget: the answer is already on screen.
+  const spendQuota = useCallback(async () => {
+    try {
+      const response = await fetch('/api/quota/increment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
+        },
+      });
+      if (response.ok) {
+        setAuthQuota(prev => ({...prev, questionsUsed: prev.questionsUsed + 1}));
+      } else if (response.status === 401) {
+        handleAuthError(handleLogout, 'Failed to increment quota: Unauthorized.');
+      } else {
+        logger.error('Failed to increment quota on backend', response.statusText);
+      }
+    } catch (error) {
+      console.error('Error incrementing quota:', error);
+    }
+  }, [handleAuthError, handleLogout]);
+
+  // A retry is practice only: it never costs quota and never moves the rating.
+  const handleQuestionComplete = useCallback(({ question, classification, isRetry }: { question: Question, classification: AnswerOutcome, isRetry?: boolean }): RatingResult => {
+    const before = skills.find(skill => skill.id === question.skillId)?.rating ?? 0;
+    if (isRetry) return { before, after: before };
+
     // Deduct from quota if it's the first time this question is being engaged with in this session
     if (isAuthenticated && practiceSession && !practiceSession.consumedQuestionIds.has(question.id)) {
-        try {
-            const response = await fetch('/api/quota/increment', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
-                },
-            });
-            if (response.ok) {
-                // Optimistically update local state
-                setAuthQuota(prev => ({...prev, questionsUsed: prev.questionsUsed + 1}));
-            } else if (response.status === 401) {
-                handleAuthError(handleLogout, 'Failed to increment quota: Unauthorized.');
-            } else {
-                logger.error('Failed to increment quota on backend', response.statusText);
-            }
-        } catch (error) {
-            console.error('Error incrementing quota:', error);
-        }
-        
-        // Update the session state to mark this question as consumed
         setPracticeSession(prevSession => {
             if (!prevSession) return null;
             const newConsumedIds = new Set(prevSession.consumedQuestionIds);
             newConsumedIds.add(question.id);
             return { ...prevSession, consumedQuestionIds: newConsumedIds };
         });
+        void spendQuota();
     }
 
-    setSkills(prevSkills => 
-        prevSkills.map(skill => {
-            if (skill.id === question.skillId) {
-                // The change depends on the level the question was asked at, and each level has a ceiling.
-                return { ...skill, rating: updateRating(skill.rating, classification, question.level) };
-            }
-            return skill;
-        })
-    );
-  }, [isAuthenticated, practiceSession, setAuthQuota, setPracticeSession, setSkills]);
+    // The change depends on the level the question was asked at, and each level has a ceiling.
+    const after = updateRating(before, classification, question.level);
+    setSkills(prevSkills => prevSkills.map(skill => skill.id === question.skillId ? { ...skill, rating: after } : skill));
+    return { before, after };
+  }, [skills, isAuthenticated, practiceSession, spendQuota, setPracticeSession, setSkills]);
+
+  // One tap start: the recommended level and a short session, so there is nothing to decide first.
+  const handleQuickStart = useCallback((skill: Skill, level: ExperienceLevel = recommendedLevel(skill.rating)) => {
+    const count = defaultQuestionCount(isAuthenticated, questionsRemaining);
+    if (isAuthenticated && count === 0) {
+      setLimitModal({ isOpen: true, reason: 'quota' });
+      return;
+    }
+    void handleStartPractice(skill, level, count);
+  }, [isAuthenticated, questionsRemaining, handleStartPractice]);
+
+  // Starter chips on the empty home screen: add the skill and begin straight away.
+  const handleStarterSkill = useCallback((name: string) => {
+    const skill = addSkill(name);
+    if (skill) handleQuickStart(skill);
+  }, [addSkill, handleQuickStart]);
+
+  const handlePracticeAgain = useCallback(async (level: ExperienceLevel) => {
+    if (!practiceSession) return;
+    const skill = skills.find(s => s.id === practiceSession.skill.id) ?? practiceSession.skill;
+    await endPracticeSession();
+    handleQuickStart(skill, level);
+  }, [practiceSession, skills, endPracticeSession, handleQuickStart]);
 
   const handlePurchaseQuestions = useCallback(async (quantity: number, priceCents: number) => {
     if (!isAuthenticated) {
@@ -469,8 +494,21 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     }
   }, [isAuthenticated]);
 
+  const isOnHome = practiceSession === null;
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setInsights(null);
+      return;
+    }
+    if (!isOnHome) return;
+    let cancelled = false;
+    // The home screen falls back to advice from the skills list if this fails, so errors can be ignored.
+    fetchInsights().then(data => { if (!cancelled) setInsights(data); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [isAuthenticated, isOnHome]);
+
   if (practiceSession) {
-    return <PracticeView session={practiceSession} onEndSession={endPracticeSession} onNavigate={navigateQuestion} onQuestionComplete={handleQuestionComplete} questionsRemaining={questionsRemaining} isAuthenticated={isAuthenticated} />;
+    return <PracticeView session={practiceSession} onEndSession={endPracticeSession} onNavigate={navigateQuestion} onQuestionComplete={handleQuestionComplete} onPracticeAgain={handlePracticeAgain} questionsRemaining={questionsRemaining} isAuthenticated={isAuthenticated} />;
   }
 
   return (
@@ -486,6 +524,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         onPurchaseQuestions={handlePurchaseQuestions}
         onOpenWelcomeModal={() => setIsWelcomeModalOpen(true)}
         onOpenProgress={() => setIsProgressOpen(true)}
+        streak={insights ? { current: insights.totals.currentStreak, practicedToday: insights.totals.practicedToday } : null}
         setShowPurchaseModal={setShowPurchaseModal}
       />
       {isStartingSession && (
@@ -504,7 +543,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           onOpenPracticeOptions={(skill) => setPracticeOptions({ isOpen: true, skill })}
           onOpenAddQuestionModal={() => setIsCustomQuestionModalOpen(true)}
           onOpenReview={(skill) => setReviewModal({ isOpen: true, skill })}
+          onQuickStart={(skill) => handleQuickStart(skill)}
+          onStarterSkill={handleStarterSkill}
           isSkillLimitReached={isSkillLimitReached}
+          isAuthenticated={isAuthenticated}
+          questionsRemaining={questionsRemaining}
+          insights={insights}
         />
       </main>
       {isCustomQuestionModalOpen && (
@@ -553,26 +597,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           )}
         />
       )}
-      {(isWelcomeModalOpen || (!isAuthenticated && !hasSeenWelcomeModal) || (isAuthenticated && hasSeenWelcomeModalAuth === false)) && (
-        <WelcomeModal onClose={async () => {
-          setIsWelcomeModalOpen(false); // Close the modal
-          if (isAuthenticated) {
-            try {
-              await fetch('/api/user/seen-welcome-modal', {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
-                },
-              });
-              setHasSeenWelcomeModalAuth(true);
-            } catch (error) {
-              console.error('Error updating welcome modal status:', error);
-            }
-          } else {
-            setHasSeenWelcomeModal(true);
-          }
-        }} />
-      )}
+      {isWelcomeModalOpen && <WelcomeModal onClose={() => setIsWelcomeModalOpen(false)} />}
       {isProgressOpen && isAuthenticated && (
         <ProgressModal onClose={() => setIsProgressOpen(false)} />
       )}

@@ -215,7 +215,7 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
 
 
 app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, async (req, res) => {
-  const { questionText, userAnswer, skillId, skillName, isIdk, delivery } = req.body;
+  const { questionText, userAnswer, skillId, skillName, isIdk, delivery, isRetry } = req.body;
 
   if (typeof questionText !== 'string' || !questionText.trim() || typeof userAnswer !== 'string') {
     return res.status(400).json({ error: 'Missing questionText or userAnswer' });
@@ -245,8 +245,9 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
     }
 
     // Signed-in users get the answer recorded so progress insights can be built from it.
+    // A retry after seeing the mentor answer is practice only, so it is not recorded.
     // A logging failure must never cost the user the evaluation they already waited for.
-    if (req.userId && typeof skillId === 'string' && typeof skillName === 'string') {
+    if (req.userId && isRetry !== true && typeof skillId === 'string' && typeof skillName === 'string') {
       try {
         await insertAnswer({
           userId: req.userId,

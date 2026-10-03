@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import type { Skill, ExperienceLevel } from '../types';
 import { XIcon, SpinnerIcon } from './Icons';
 import { RATING_CEILING, isAtCeiling } from '../utils/rating';
+import { DEFAULT_QUESTION_COUNT, LEVEL_STYLE, recommendedLevel } from '../utils/practiceDefaults';
 
 interface StartPracticeModalProps {
   skill: Skill;
@@ -23,8 +24,8 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
   questionsRemaining,
   sessionsRemaining,
 }) => {
-  const [level, setLevel] = useState<ExperienceLevel>('Mid-level');
-  const [count, setCount] = useState<number>(5);
+  const [level, setLevel] = useState<ExperienceLevel>(recommendedLevel(skill.rating));
+  const [count, setCount] = useState<number>(DEFAULT_QUESTION_COUNT);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,6 +34,7 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
   
   const levels: ExperienceLevel[] = ['Entry-level', 'Mid-level', 'Expert'];
   const counts: number[] = [5, 10, 15];
+  const recommended = recommendedLevel(skill.rating);
   
   const getButtonClass = (isActive: boolean, isDisabled: boolean = false) => {
     if (isDisabled) {
@@ -65,12 +67,15 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
                     type="button"
                     key={l}
                     onClick={() => setLevel(l)}
-                    className={`py-2 px-2 rounded-lg text-sm font-semibold transition-all text-center ${getButtonClass(level === l)}`}
+                    aria-pressed={level === l}
+                    className={`py-2 px-2 rounded-lg text-sm font-semibold transition-all text-center border ${level === l ? `${LEVEL_STYLE[l].border} bg-background-light ${LEVEL_STYLE[l].text}` : 'border-transparent bg-background-light hover:bg-gray-600 text-text-primary'}`}
                   >
                     {l}
+                    {l === recommended && <span className="block text-[10px] font-medium uppercase tracking-wide text-text-muted">Recommended</span>}
                   </button>
                 ))}
               </div>
+              <p className="mt-2 text-xs text-text-secondary">{LEVEL_STYLE[level].blurb}.</p>
               <p className="mt-2 text-xs text-text-muted">
                 {level === 'Expert'
                   ? 'Expert questions can take your expertise all the way to 100%.'
@@ -128,7 +133,7 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
               <button
                 type="submit"
                 disabled={isStarting}
-                className="w-full sm:w-48 flex justify-center items-center py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-light disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors text-sm"
+                className="w-full sm:w-48 flex justify-center items-center py-2 px-4 rounded-lg bg-brand-primary text-white font-semibold hover:bg-brand-hover disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors text-sm"
               >
                 {isStarting ? (
                   <>
