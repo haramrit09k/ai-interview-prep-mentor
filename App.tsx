@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GoogleLogin, GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import logger from './src/logger'; // Import the logger
+import { readErrorMessage } from './services/gemini';
 import Footer from './components/Footer';
 
 
@@ -258,18 +259,21 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           throw new Error('Empty response from backend');
         }
         
-        let data;
+        let data: any = null;
         try {
           data = JSON.parse(responseText);
         } catch (err) {
-          throw new Error(`Invalid JSON in response: ${responseText}`);
+          // Not JSON (e.g. a gateway error page). Fall through to the status check below.
         }
 
         if (!response.ok) {
             if (response.status === 401) {
                 handleAuthError(handleLogout, 'Failed to fetch questions: Unauthorized.');
             }
-            throw new Error(data.error || 'Failed to fetch questions from backend');
+            throw new Error(data?.error || data?.message || `Failed to fetch questions (HTTP ${response.status})`);
+        }
+        if (!data || !Array.isArray(data.questions)) {
+          throw new Error('Unexpected response from the server while fetching questions.');
         }
 
         const fetchedQuestions: Question[] = data.questions.map((q: any) => ({
@@ -405,8 +409,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         });
 
         if (!response.ok) {
-          const errorData = await response.json();
-          logger.error('Failed to save revision summary:', errorData.error);
+          logger.error('Failed to save revision summary:', await readErrorMessage(response, 'Request failed'));
         } else {
           logger.info(`Revision summary saved for skill ${practiceSession.skill.name} for user ${userId}.`);
         }
@@ -508,9 +511,9 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       } else if (response.status === 401) {
         handleAuthError(handleLogout, 'Failed to initiate purchase: Unauthorized.');
       } else {
-        const errorData = await response.json();
-        logger.error('Failed to create checkout session:', errorData.error);
-        alert(`Failed to initiate payment: ${errorData.error}`);
+        const message = await readErrorMessage(response, 'Failed to create checkout session');
+        logger.error('Failed to create checkout session:', message);
+        alert(`Failed to initiate payment: ${message}`);
       }
     } catch (error) {
       console.error('Error during checkout initiation:', error);

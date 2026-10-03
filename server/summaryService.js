@@ -58,7 +58,6 @@ const generateRevisionSummary = async (skillName, knownQuestions, unknownQuestio
 
     prompt += `Return a JSON object with two keys:\n- "conceptsKnown": An array of strings, representing concepts the user is comfortable with. If there were no known questions, return an empty array.\n- "conceptsToReview": An array of strings, representing concepts the user should focus on for revision. If there were no unknown questions, return an empty array.`;
 
-    logger.info(`Generated prompt for Gemini API: ${prompt}`);
     
     const response = await ai.models.generateContent({
       model,
@@ -92,7 +91,6 @@ const generateRevisionSummary = async (skillName, knownQuestions, unknownQuestio
     });
 
     logger.debug('Gemini API response for revision summary:', JSON.stringify(response, null, 2));
-    logger.info(`Response from Gemini API: ${JSON.stringify(response)}`);
     if (!response) {
       throw new Error('Invalid or empty response from Gemini API');
     }

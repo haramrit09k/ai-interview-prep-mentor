@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Question, AnswerOutcome } from '../types';
-import { generateAnswerForQuestion, evaluateAnswer } from '../services/gemini';
+import { evaluateAnswer, readErrorMessage } from '../services/gemini';
 import { ChevronLeftIcon, ChevronRightIcon, BrainCircuitIcon, SpinnerIcon } from './Icons';
 import MarkdownRenderer from './MarkdownRenderer';
 import { LimitReachedModal } from './LimitReachedModal';
@@ -84,9 +84,9 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
         const { url } = await response.json();
         window.location.href = url; // Redirect to Stripe Checkout
       } else {
-        const errorData = await response.json();
-        console.error('Failed to create checkout session:', errorData.error);
-        alert(`Failed to initiate payment: ${errorData.error}`);
+        const message = await readErrorMessage(response, 'Failed to create checkout session');
+        console.error('Failed to create checkout session:', message);
+        alert(`Failed to initiate payment: ${message}`);
       }
     } catch (error) {
       console.error('Error during checkout initiation:', error);
