@@ -15,7 +15,7 @@ interface PracticeViewProps {
   session: PracticeSession;
   onEndSession: () => void;
   onNavigate: (direction: 'next' | 'prev') => void;
-  onQuestionComplete: (args: { question: Question; classification: AnswerOutcome }) => void;
+  onQuestionComplete: (args: { question: Question; classification: AnswerOutcome; conceptsKnown?: string[]; conceptsToReview?: string[] }) => void;
   questionsRemaining: number; // Receive quota from App.tsx
 }
 
@@ -28,6 +28,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
   const [feedback, setFeedback] = useState<string | null>(null);
   const [viewedAnswer, setViewedAnswer] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
 
   const handleSubmission = useCallback(async (isIdk: boolean) => {
     if (!currentQuestion) return;
@@ -39,25 +40,28 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
       return;
     }
 
+    setEvaluationError(null);
     setIsSubmitting(true);
-    setViewedAnswer(true);
 
-    // onQuestionComplete is called, which will increment the official quota in App.tsx
-    if (isIdk) {
-      // When user clicks "I Don't Know", we still want to get concepts to review
-      // Pass an empty string as userAnswer to evaluateAnswer
-      const { mentorAnswer, feedback, classification, conceptsKnown, conceptsToReview } = await evaluateAnswer(currentQuestion.text, "");
+    try {
+      // An empty answer for "I Don't Know" still gets us the mentor answer and concepts to review.
+      const { mentorAnswer, feedback, classification, conceptsKnown, conceptsToReview } =
+        await evaluateAnswer(currentQuestion.text, isIdk ? "" : userAnswer);
+
+      setViewedAnswer(true);
       setMentorAnswer(mentorAnswer);
-      setFeedback("That's okay! The first step to learning is identifying what you don't know. Review the mentor's answer below. " + feedback);
-      onQuestionComplete({ question: currentQuestion, classification: 'idk', conceptsKnown, conceptsToReview });
-    } else {
-      const { mentorAnswer, feedback, classification, conceptsKnown, conceptsToReview } = await evaluateAnswer(currentQuestion.text, userAnswer);
-      setMentorAnswer(mentorAnswer);
-      setFeedback(feedback);
-      onQuestionComplete({ question: currentQuestion, classification, conceptsKnown, conceptsToReview });
+      if (isIdk) {
+        setFeedback("That's okay! The first step to learning is identifying what you don't know. Review the mentor's answer below. " + feedback);
+      } else {
+        setFeedback(feedback);
+      }
+      // Only count the question (quota, rating, history) once we actually got an evaluation.
+      onQuestionComplete({ question: currentQuestion, classification: isIdk ? 'idk' : classification, conceptsKnown, conceptsToReview });
+    } catch (error) {
+      setEvaluationError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setIsSubmitting(false);
   }, [currentQuestion, userAnswer, onQuestionComplete, questionsRemaining, viewedAnswer]);
 
   useEffect(() => {
@@ -66,6 +70,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     setFeedback(null);
     setViewedAnswer(false);
     setIsSubmitting(false);
+    setEvaluationError(null);
   }, [session.currentQuestionIndex, session.skill.id]);
 
   const handleUpgrade = useCallback(async (quantity: number) => {
@@ -125,6 +130,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
 
     return (
       <div className="space-y-4">
+        {evaluationError && (
+          <div role="alert" className="bg-red-900/40 border border-red-500/50 text-red-200 rounded-lg p-3 text-sm sm:text-base">
+            {evaluationError} Your answer is still here, so you can submit it again.
+          </div>
+        )}
         <textarea
             rows={6}
             value={userAnswer}
@@ -162,7 +172,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
         <LimitReachedModal 
           reason="quota" 
           onClose={onEndSession} 
-          onUpgrade={handleUpgrade} 
+          onUpgrade={handleUpgrade}
+          googleLoginComponent={null}
         />
       )}
       <div className="min-h-screen flex flex-col p-4 sm:p-8">

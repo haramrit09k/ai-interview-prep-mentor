@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import type { Skill, AnswerHistory, AnswerOutcome } from '../types';
+import type { Skill } from '../types';
 import { XIcon, SpinnerIcon } from './Icons';
 import MarkdownRenderer from './MarkdownRenderer';
 

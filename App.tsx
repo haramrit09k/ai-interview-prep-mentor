@@ -14,7 +14,7 @@ import { SpinnerIcon } from './components/Icons';
 import ToastNotification from './components/ToastNotification';
 import PurchaseQuestionsModal from './components/PurchaseQuestionsModal';
 import { v4 as uuidv4 } from 'uuid';
-import { GoogleLogin, GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
+import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import logger from './src/logger'; // Import the logger
 import { readErrorMessage } from './services/gemini';

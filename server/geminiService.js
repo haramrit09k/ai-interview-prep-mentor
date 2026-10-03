@@ -166,17 +166,22 @@ const evaluateAnswer = async (questionText, userAnswer) => {
         throw new Error("Received empty response from evaluation API");
       }
       const result = JSON.parse(jsonStr);
-      
-      return result;
-  } catch (error) {
-      logger.error("Error evaluating answer:", error);
+
+      const validClassifications = ['correct', 'partially_correct', 'incorrect'];
+      if (!result || typeof result.mentorAnswer !== 'string' || typeof result.feedback !== 'string' ||
+          !validClassifications.includes(result.classification)) {
+        throw new Error("Evaluation response was not in the expected format");
+      }
       return {
-          mentorAnswer: "Sorry, I encountered an error while generating an answer. Please try again.",
-          feedback: "Could not evaluate your answer due to an error.",
-          classification: 'incorrect',
-          conceptsKnown: [],
-          conceptsToReview: []
+        ...result,
+        conceptsKnown: Array.isArray(result.conceptsKnown) ? result.conceptsKnown : [],
+        conceptsToReview: Array.isArray(result.conceptsToReview) ? result.conceptsToReview : [],
       };
+  } catch (error) {
+      // Let the route decide how to respond. Returning a fake "incorrect" result here
+      // would hide outages, charge the user quota and get cached as if it were real.
+      logger.error("Error evaluating answer:", error);
+      throw error;
   }
 };
 
