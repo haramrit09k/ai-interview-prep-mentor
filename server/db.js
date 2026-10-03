@@ -145,9 +145,19 @@ db.query(createTableSql)
       word_count INTEGER,
       wpm INTEGER,
       filler_count INTEGER,
-      answered_at TEXT NOT NULL
+      answered_at TEXT NOT NULL,
+      level TEXT
     );
   `))
+  // Tables created before the level column existed need it added. Fresh tables already have it.
+  .then(() => {
+    if (isProduction) return db.query('ALTER TABLE answer_log ADD COLUMN IF NOT EXISTS level TEXT;');
+    return db.query('PRAGMA table_info(answer_log);').then(({ rows }) => {
+      if (rows.some((col) => col.name === 'level')) return null;
+      logger.info('Adding level column to answer_log table.');
+      return db.query('ALTER TABLE answer_log ADD COLUMN level TEXT;');
+    });
+  })
   .then(() => db.query('CREATE INDEX IF NOT EXISTS idx_answer_log_user_time ON answer_log (user_id, answered_at);'))
   .then(() => db.query('CREATE INDEX IF NOT EXISTS idx_answer_log_user_skill_time ON answer_log (user_id, skill_id, answered_at);'))
   .then(() => logger.info('Database schema initialization complete.'))

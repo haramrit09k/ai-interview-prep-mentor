@@ -16,7 +16,7 @@ I built it to learn how the pieces of a small paid web product fit together: log
 - Built to be accessible: everything works from the keyboard, nothing relies on colour alone, the progress view opens with a one-sentence summary, and typing is always available as an alternative to voice
 - Keeps a skill rating that moves with your answers (+10 correct, +5 partial, -5 wrong or "I don't know")
 - Saves questions you didn't get to, and serves them first next time
-- Writes a short revision summary per skill at the end of a session
+- A Review button on every skill opens a study sheet built from your whole history: the questions worth another try (with a one-click "practise these" session), concepts you keep missing, concepts you have mastered, and how that skill is trending
 - Works as a guest (2 skills, 2 sessions); signing in with Google unlocks 5 skills and 50 questions a week
 - Sells extra question packs through Stripe Checkout
 
@@ -47,7 +47,7 @@ flowchart LR
     API -- "verify token" --> Google
     API --> RL
     RL <--> Redis
-    API -- "questions, evaluations,<br/>summaries, transcription" --> Gemini
+    API -- "questions, evaluations,<br/>transcription" --> Gemini
     API <--> DB
     UI -- "spoken answer (audio, 2 min max)" --> API
     UI -- "redirect to pay" --> Stripe
@@ -119,6 +119,7 @@ Audio is never stored. It is held in memory long enough to send to Gemini and th
 - **One codebase, two databases.** SQLite for local development and Postgres on Heroku, behind a small `query()` wrapper.
 - **Delivery stats are ordinary code, not a model call.** Gemini only transcribes (and is told to keep the "ums"). Pace is words divided by recording time, and filler words are matched against a list. That makes the numbers repeatable, cheap, and unit-testable. The list is deliberately conservative: "like" only counts when it is set off by commas, because it is usually a real word.
 - **Progress comes from a normalized `answer_log` table.** Each evaluated answer by a signed-in user is one row (skill, outcome, concepts known and missed, optional pace and filler counts). The insights endpoint reads those rows and a pure function turns them into streaks, trends, recurring gaps and a suggested next step. No model call is involved, so it is instant and free. Day boundaries use the user's own time zone. Users can delete their history from the progress view.
+- **The Review sheet is computed, not generated.** It reads the recorded answers for one skill and works out the latest result per question, the concepts missed or since mastered, and the trend. No model call, so it is instant and free, and it works from any device because the history lives on the server. "Practise these" starts a session from the missed questions using the level each was asked at, and a question leaves the list once its latest answer is correct, which is a simple form of spaced repetition.
 - **Voice is for signed-in users.** Audio is the most expensive request the API accepts, so it sits behind login, a 5 MB cap, and the same per-user rate limit as everything else.
 - **Cache keys include a hash of the answer.** Identical question and answer pairs reuse a stored evaluation, which saves model calls without mixing up different answers.
 
@@ -128,7 +129,7 @@ Audio is never stored. It is held in memory long enough to send to Gemini and th
 | --- | --- |
 | Frontend | React 19, TypeScript, Vite, Tailwind, MediaRecorder for voice |
 | Backend | Node 24, Express |
-| AI | Google Gemini (`gemini-3.8-flash`, configurable) via `@google/genai`, used for questions, evaluation, summaries and audio transcription |
+| AI | Google Gemini (`gemini-3.8-flash`, configurable) via `@google/genai`, used for questions, evaluation and audio transcription |
 | Auth | Google Identity Services, ID token verified server-side |
 | Data | Postgres in production, SQLite locally, Redis for caching and rate limiting |
 | Payments | Stripe Checkout and webhooks |
@@ -184,7 +185,7 @@ For Stripe webhooks locally, run `stripe listen --forward-to localhost:3001/webh
 I'd rather list these than have you find them:
 
 - The Google ID token is kept in `localStorage`, which is exposed if the site ever has an XSS bug. Moving it to an HttpOnly cookie is the planned fix (see `ISSUES.md`).
-- Unanswered questions and revision summaries are still stored as JSON text on the `users` row. The new `answer_log` table is properly normalized, and those two should follow.
+- Unanswered questions are still stored as JSON text on the `users` row. The `answer_log` table is properly normalized, and that should follow. Summaries written by the old AI-based review are kept in the `users` table and shown as an "earlier summary" in the Review dialog, but nothing writes new ones.
 - The webhook doesn't record processed event ids, so a retried event could credit a user twice.
 - The server has tests (delivery stats, insights, HTTP routes, the database layer). The React UI does not have committed tests; I exercised the voice and progress flows in a real browser by hand.
 - Voice recording is tested in Chromium with a fake microphone. Safari and iOS record MP4 instead of WebM and the code handles that, but it needs a check on a real device.

@@ -48,7 +48,7 @@ test('clips oversized and malformed input', async () => {
   assert.equal(known[0].length, 100);
 });
 
-const { recentQuestions } = require('../server/answerLog');
+const { recentQuestions, listAnswersForSkill } = require('../server/answerLog');
 
 test('recentQuestions: newest first, no duplicates, per skill, bounded', async () => {
   const base = { userId: 'rq', skillName: 'Java', outcome: 'correct', conceptsKnown: [], conceptsToReview: [] };
@@ -60,4 +60,18 @@ test('recentQuestions: newest first, no duplicates, per skill, bounded', async (
   assert.deepEqual(await recentQuestions('rq', 'go', 10), ['go-q']);
   assert.deepEqual(await recentQuestions('rq', 'java', 2), ['q3', 'q1']);
   assert.deepEqual(await recentQuestions('nobody', 'java', 10), []);
+});
+
+test('the level is stored with the answer, and skill lookups are scoped to user and skill', async () => {
+  const base = { skillName: 'Go', outcome: 'incorrect', conceptsKnown: [], conceptsToReview: [] };
+  await insertAnswer({ ...base, userId: 'lv', skillId: 'go', questionText: 'with level', level: 'Expert' });
+  await insertAnswer({ ...base, userId: 'lv', skillId: 'go', questionText: 'no level' });
+  await insertAnswer({ ...base, userId: 'lv', skillId: 'rust', questionText: 'other skill', level: 'Mid-level' });
+  await insertAnswer({ ...base, userId: 'someone', skillId: 'go', questionText: 'other user', level: 'Mid-level' });
+
+  const rows = await listAnswersForSkill('lv', 'go');
+  assert.deepEqual(rows.map((r) => r.question_text), ['with level', 'no level']);
+  assert.equal(rows[0].level, 'Expert');
+  assert.equal(rows[1].level, null);
+  assert.deepEqual(await listAnswersForSkill('nobody', 'go'), []);
 });

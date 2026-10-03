@@ -7,10 +7,9 @@ const { authMiddleware } = require('./auth');
 const { authOptionalMiddleware } = require('./authOptional');
 const { generateQuestionsForSkill, evaluateAnswer, transcribeAudio } = require('./geminiService');
 const { analyzeDelivery, sanitizeDelivery } = require('./deliveryStats');
-const { computeInsights } = require('./insights');
-const { insertAnswer, listAnswers, recentQuestions, deleteAnswers } = require('./answerLog');
+const { computeInsights, computeSkillReview } = require('./insights');
+const { insertAnswer, listAnswers, listAnswersForSkill, recentQuestions, deleteAnswers } = require('./answerLog');
 const { LIMITS, LEVELS, cleanBlock } = require('./prompts');
-const { generateRevisionSummary } = require('./summaryService');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
@@ -120,7 +119,7 @@ app.post('/api/quota/increment', express.json(), authMiddleware, async (req, res
   try {
     await pool.query('UPDATE users SET questions_used = questions_used + 1 WHERE id = $1', [req.userId]);
     logger.info(`POST /api/quota/increment: Quota incremented for user ${req.userId}.`);
-    res.status(200).json({ error: 'Quota updated' });
+    res.status(200).json({ ok: true });
   } catch (err) {
     logger.error(`POST /api/quota/increment: Error for user ${req.userId}:`, err.message);
     res.status(500).json({ error: 'Server Error' });
@@ -132,7 +131,7 @@ app.post('/api/user/seen-welcome-modal', express.json(), authMiddleware, async (
   try {
     await pool.query('UPDATE users SET has_seen_welcome_modal = TRUE WHERE id = $1', [req.userId]);
     logger.info(`POST /api/user/seen-welcome-modal: Welcome modal status updated for user ${req.userId}.`);
-    res.status(200).json({ error: 'Welcome modal status updated' });
+    res.status(200).json({ ok: true });
   } catch (err) {
     logger.error(`POST /api/user/seen-welcome-modal: Error for user ${req.userId}:`, err.message);
     res.status(500).json({ error: 'Server Error' });
@@ -258,6 +257,7 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
           conceptsKnown: evaluation.conceptsKnown,
           conceptsToReview: evaluation.conceptsToReview,
           delivery: cleanDelivery,
+          level: gradingLevel,
         });
       } catch (logErr) {
         logger.error(`Could not record answer for user ${req.userId}:`, logErr.message);
@@ -361,65 +361,36 @@ app.post('/api/questions/save-unanswered', express.json(), authMiddleware, async
 
     await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
     logger.info(`POST /api/questions/save-unanswered: Saved unanswered questions for user ${req.userId}.`);
-    res.status(200).json({ error: 'Unanswered questions saved' });
+    res.status(200).json({ ok: true });
   } catch (err) {
     logger.error(`POST /api/questions/save-unanswered: Error for user ${req.userId}:`, err.message);
     res.status(500).json({ error: 'Server Error' });
   }
 });
 
-app.post('/api/revision-summary', express.json(), authMiddleware, async (req, res) => {
-  logger.debug(`POST /api/revision-summary: User ID: ${req.userId}`);
-  const { skillId, skillName, knownQuestions, unknownQuestions } = req.body;
-
-  if (!skillId || !skillName || !Array.isArray(knownQuestions) || !Array.isArray(unknownQuestions)) {
-    logger.warn(`POST /api/revision-summary: Invalid request parameters for user ${req.userId}.`)
-    return res.status(400).json({ error: 'Missing skillId, skillName, knownQuestions, or unknownQuestions' });
-  }
-
+// A study sheet for one skill, built from every answer recorded for it. No model call, so it is instant.
+// Summaries written by the old AI based review are still returned (as previousSummary) so nothing is lost.
+app.get('/api/review/:skillId', authMiddleware, async (req, res) => {
+  const skillId = String(req.params.skillId || '').slice(0, 100);
   try {
-    logger.debug(`Generating summary for skill: ${skillName}, known: ${knownQuestions.length}, unknown: ${unknownQuestions.length}`);
-    const generatedSummary = await generateRevisionSummary(skillName, knownQuestions, unknownQuestions);
-    logger.debug(`Generated summary:`, generatedSummary);
+    const rows = await listAnswersForSkill(req.userId, skillId);
+    const review = computeSkillReview(rows);
 
-    const { rows } = await pool.query('SELECT revision_summaries FROM users WHERE id = $1', [req.userId]);
-    let summaries = {};
-    if (rows.length > 0 && rows[0].revision_summaries) {
-      summaries = JSON.parse(rows[0].revision_summaries);
+    let previousSummary = null;
+    try {
+      const { rows: userRows } = await pool.query('SELECT revision_summaries FROM users WHERE id = $1', [req.userId]);
+      const stored = userRows.length > 0 && userRows[0].revision_summaries ? JSON.parse(userRows[0].revision_summaries) : {};
+      const old = stored[skillId];
+      // The old placeholder text for "nothing was answered" is not worth showing.
+      if (old && old.conceptsKnown && !/^No questions were answered/.test(old.conceptsKnown)) previousSummary = old;
+    } catch (summaryErr) {
+      logger.warn(`GET /api/review: could not read the previous summary for user ${req.userId}: ${summaryErr.message}`);
     }
 
-    summaries[skillId] = { ...generatedSummary, lastUpdated: new Date().toISOString() };
-
-    await pool.query('UPDATE users SET revision_summaries = $1 WHERE id = $2', [JSON.stringify(summaries), req.userId]);
-    logger.info(`POST /api/revision-summary: Saved summary for skill ${skillId} for user ${req.userId}.`);
-    res.status(200).json({ error: 'Revision summary saved' });
+    res.json({ ...review, previousSummary });
   } catch (err) {
-    logger.error(`POST /api/revision-summary: Error for user ${req.userId}:`, err.message);
-    res.status(500).json({ error: 'Server Error' });
-  }
-});
-
-app.get('/api/revision-summary/:skillId', authMiddleware, async (req, res) => {
-  logger.debug(`GET /api/revision-summary/:skillId: User ID: ${req.userId}`);
-  const { skillId } = req.params;
-
-  try {
-    const { rows } = await pool.query('SELECT revision_summaries FROM users WHERE id = $1', [req.userId]);
-    let summaries = {};
-    if (rows.length > 0 && rows[0].revision_summaries) {
-      summaries = JSON.parse(rows[0].revision_summaries);
-    }
-
-    if (summaries[skillId]) {
-      logger.info(`GET /api/revision-summary/:skillId: Found summary for skill ${skillId} for user ${req.userId}.`);
-      res.json(summaries[skillId]);
-    } else {
-      logger.info(`GET /api/revision-summary/:skillId: No summary found for skill ${skillId} for user ${req.userId}.`);
-      res.status(404).json({ error: 'Revision summary not found' });
-    }
-  } catch (err) {
-    logger.error(`GET /api/revision-summary/:skillId: Error for user ${req.userId}:`, err.message);
-    res.status(500).json({ error: 'Server Error' });
+    logger.error(`GET /api/review/:skillId: Error for user ${req.userId}:`, err.message);
+    res.status(500).json({ error: 'Could not load your review.' });
   }
 });
 
@@ -503,56 +474,33 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   res.json({ received: true });
 });
 
-// Endpoint to handle saving session data when the user exits the page
+// Saves the questions a user did not get to when they close the page mid session. The browser sends this
+// with sendBeacon, so there is no response to read. Older clients also send summary data, which is ignored.
 app.post('/api/session/save-on-exit', express.json(), authMiddleware, async (req, res) => {
     logger.debug(`POST /api/session/save-on-exit: User ID: ${req.userId}`);
-    const { unansweredQuestions, summaryData } = req.body;
+    const { unansweredQuestions } = req.body;
 
-    if (!summaryData || !summaryData.skillId || !Array.isArray(summaryData.history)) {
-        return res.status(400).json({ error: 'Missing summary data.' });
+    if (!Array.isArray(unansweredQuestions) || unansweredQuestions.length === 0) {
+        return res.status(200).json({ ok: true });
     }
 
     try {
-        // Use a transaction to ensure atomicity
-        await pool.query('BEGIN');
+        const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
+        let storedQuestionMap = (rows.length > 0 && rows[0].unanswered_questions) ? JSON.parse(rows[0].unanswered_questions) : {};
 
-        // 1. Save unanswered questions
-        if (unansweredQuestions && unansweredQuestions.length > 0) {
-            const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
-            let storedQuestionMap = (rows.length > 0 && rows[0].unanswered_questions) ? JSON.parse(rows[0].unanswered_questions) : {};
-
-            unansweredQuestions.forEach(question => {
-                const { skillId, level, text } = question;
-                if (!skillId || !level || !text) return;
-                if (!storedQuestionMap[skillId]) storedQuestionMap[skillId] = {};
-                if (!storedQuestionMap[skillId][level]) storedQuestionMap[skillId][level] = [];
-                if (!storedQuestionMap[skillId][level].some(q => q.text === text)) {
-                    storedQuestionMap[skillId][level].push(question);
-                }
-            });
-            await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
-            logger.info(`Saved ${unansweredQuestions.length} unanswered questions for user ${req.userId} on exit.`);
-        }
-
-        // 2. Generate and save revision summary
-        const { skillId, skillName, history } = summaryData;
-        const knownQuestions = history.filter(h => h.outcome === 'correct' || h.outcome === 'partially_correct').map(h => h.questionText);
-        const unknownQuestions = history.filter(h => h.outcome === 'incorrect' || h.outcome === 'idk').map(h => h.questionText);
-
-        if (knownQuestions.length > 0 || unknownQuestions.length > 0) {
-            const generatedSummary = await generateRevisionSummary(skillName, knownQuestions, unknownQuestions);
-            const { rows: summaryRows } = await pool.query('SELECT revision_summaries FROM users WHERE id = $1', [req.userId]);
-            let summaries = (summaryRows.length > 0 && summaryRows[0].revision_summaries) ? JSON.parse(summaryRows[0].revision_summaries) : {};
-            summaries[skillId] = { ...generatedSummary, lastUpdated: new Date().toISOString() };
-            await pool.query('UPDATE users SET revision_summaries = $1 WHERE id = $2', [JSON.stringify(summaries), req.userId]);
-            logger.info(`Saved revision summary for skill ${skillId} for user ${req.userId} on exit.`);
-        }
-
-        await pool.query('COMMIT');
-        res.status(200).json({ error: 'Session data saved successfully.' });
-
+        unansweredQuestions.forEach(question => {
+            const { skillId, level, text } = question;
+            if (!skillId || !level || !text) return;
+            if (!storedQuestionMap[skillId]) storedQuestionMap[skillId] = {};
+            if (!storedQuestionMap[skillId][level]) storedQuestionMap[skillId][level] = [];
+            if (!storedQuestionMap[skillId][level].some(q => q.text === text)) {
+                storedQuestionMap[skillId][level].push(question);
+            }
+        });
+        await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);
+        logger.info(`Saved unanswered questions for user ${req.userId} on exit.`);
+        res.status(200).json({ ok: true });
     } catch (err) {
-        await pool.query('ROLLBACK');
         logger.error(`Error in /api/session/save-on-exit for user ${req.userId}:`, err.message);
         res.status(500).json({ error: 'Server Error' });
     }

@@ -56,7 +56,6 @@ stub('geminiService.js', {
   },
   transcribeAudio: async () => (geminiMode === 'silent' ? '' : 'um a closure is basically a function that remembers its scope'),
 });
-stub('summaryService.js', { generateRevisionSummary: async () => ({}) });
 
 const app = require('../server/index.js');
 let server;
@@ -225,4 +224,86 @@ test('evaluate: a missing or invalid level is passed on as unspecified', async (
   await call('POST', '/api/evaluate', { json: { questionText: 'custom question two', userAnswer: 'a' } });
   assert.equal(evaluateArgs[0][2].level, undefined);
   assert.equal(evaluateArgs[1][2].level, undefined);
+});
+
+// ---------- Review (study sheet) ----------
+
+const answer = (token, fields) =>
+  call('POST', '/api/evaluate', { token, json: { userAnswer: 'an answer', skillId: 'rev', skillName: 'Review Skill', level: 'Mid-level', ...fields } });
+
+test('review: requires sign in', async () => {
+  assert.equal((await call('GET', '/api/review/rev')).status, 401);
+});
+
+test('review: a user with no history gets an empty sheet', async () => {
+  const sheet = await (await call('GET', '/api/review/rev', { token: 'newbie' })).json();
+  assert.equal(sheet.hasData, false);
+  assert.deepEqual(sheet.retry, []);
+  assert.equal(sheet.previousSummary, null);
+});
+
+test('review: builds the sheet from recorded answers, per skill and per user', async () => {
+  geminiMode = 'ok'; // the stub grades "correct" and reports known=[scope], review=[hoisting]
+  await answer('dana', { questionText: 'review q1' });
+  await new Promise((r) => setTimeout(r, 5));
+  await answer('dana', { questionText: 'review q2', isIdk: true });          // recorded as idk
+  await answer('dana', { questionText: 'other skill q', skillId: 'other', skillName: 'Other' });
+  await answer('erin', { questionText: 'erin only' });
+
+  const sheet = await (await call('GET', '/api/review/rev', { token: 'dana' })).json();
+  assert.equal(sheet.hasData, true);
+  assert.equal(sheet.skill.name, 'Review Skill');
+  assert.equal(sheet.counts.answers, 2);
+  assert.equal(sheet.gaps[0].concept, 'hoisting');
+  // q1 was answered correctly, q2 was "I don't know": only q2 needs another try, and it keeps its level
+  assert.deepEqual(sheet.retry.map((r) => r.text), ['review q2']);
+  assert.equal(sheet.retry[0].level, 'Mid-level');
+  assert.equal(sheet.totalToRetry, 1);
+
+  const other = await (await call('GET', '/api/review/other', { token: 'dana' })).json();
+  assert.equal(other.counts.answers, 1);
+  const erin = await (await call('GET', '/api/review/rev', { token: 'erin' })).json();
+  assert.equal(erin.counts.answers, 1, 'one user never sees another user\'s answers');
+});
+
+test('review: previous AI summaries are still shown, but the empty placeholder is not', async () => {
+  const db = require('../server/db');
+  const seed = async (id, summaries) => {
+    await call('GET', '/api/quota', { token: id }); // creates the user row, like login does
+    await db.query('UPDATE users SET revision_summaries = $1 WHERE id = $2', [JSON.stringify(summaries), id]);
+  };
+  await seed('oldtimer', { rev: { conceptsKnown: '- Closures', conceptsToReview: '- Hoisting', lastUpdated: '2026-01-01T00:00:00.000Z' } });
+  await seed('placeholder', { rev: { conceptsKnown: 'No questions were answered in this session.', conceptsToReview: 'Complete a few questions...' } });
+
+  const kept = await (await call('GET', '/api/review/rev', { token: 'oldtimer' })).json();
+  assert.equal(kept.previousSummary.conceptsKnown, '- Closures');
+  const dropped = await (await call('GET', '/api/review/rev', { token: 'placeholder' })).json();
+  assert.equal(dropped.previousSummary, null);
+});
+
+test('the AI summary endpoints are gone, and ending a session no longer needs them', async () => {
+  assert.equal((await call('POST', '/api/revision-summary', { token: 'dana', json: { skillId: 'rev', skillName: 'x', knownQuestions: [], unknownQuestions: [] } })).status, 404);
+  assert.equal((await call('GET', '/api/revision-summary/rev', { token: 'dana' })).status, 404);
+});
+
+test('save on exit: stores unanswered questions, tolerates old clients, and never errors on empty input', async () => {
+  await call('GET', '/api/quota', { token: 'quitter' });
+  const q = { skillId: 'rev', level: 'Mid-level', text: 'left unanswered' };
+  // an old client also sends summaryData; it is ignored
+  const res = await call('POST', '/api/session/save-on-exit', { token: 'quitter', json: { unansweredQuestions: [q], summaryData: { skillId: 'rev', skillName: 'x', history: [] } } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
+  assert.equal((await call('POST', '/api/session/save-on-exit', { token: 'quitter', json: { unansweredQuestions: [] } })).status, 200);
+  assert.equal((await call('POST', '/api/session/save-on-exit', { token: 'quitter', json: {} })).status, 200);
+
+  // the saved question is served first next time for that skill and level
+  questionCalls = [];
+  const next = await (await call('GET', '/api/questions?skillName=Review&level=Mid-level&skillId=rev&count=1', { token: 'quitter' })).json();
+  assert.equal(next.questions[0].text, 'left unanswered');
+});
+
+test('success responses are not labelled as errors', async () => {
+  const res = await call('POST', '/api/quota/increment', { token: 'quitter', json: {} });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
 });

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { computeInsights } = require('../server/insights');
+const { computeInsights, computeSkillReview } = require('../server/insights');
 
 const NOW = Date.parse('2026-03-18T12:00:00Z'); // a Wednesday
 const daysAgo = (n, hour = 9) => new Date(NOW - n * 86_400_000 + (hour - 12) * 3_600_000).toISOString();
@@ -147,4 +147,68 @@ test('c++ and c# are not collapsed into "c"', () => {
   const { gaps, mastered } = computeInsights(rows, { now: NOW });
   assert.equal(gaps.length, 1);
   assert.equal(mastered.length, 0);
+});
+
+// ---------- per skill study sheet ----------
+
+test('study sheet for no data', () => {
+  const review = computeSkillReview([], { now: NOW });
+  assert.equal(review.hasData, false);
+  assert.deepEqual(review.retry, []);
+  assert.equal(review.totalToRetry, 0);
+});
+
+test('study sheet: counts, accuracy and dates', () => {
+  const rows = [
+    row({ outcome: 'correct', answered_at: daysAgo(5) }),
+    row({ outcome: 'partially_correct', answered_at: daysAgo(3) }),
+    row({ outcome: 'incorrect', answered_at: daysAgo(1) }),
+    row({ outcome: 'idk', answered_at: daysAgo(1, 10) }),
+  ];
+  const review = computeSkillReview(rows, { now: NOW });
+  assert.deepEqual(review.counts, { answers: 4, correct: 1, partial: 1, missed: 2 });
+  assert.equal(review.skill.accuracy, 38); // (1 + .5 + 0 + 0) / 4
+  assert.equal(review.skill.firstPracticed, daysAgo(5));
+  assert.equal(review.skill.lastPracticed, daysAgo(1, 10));
+});
+
+test('retry list: latest result per question, serious misses first, longest ago first', () => {
+  const rows = [
+    row({ question_text: 'fixed later', outcome: 'incorrect', answered_at: daysAgo(9) }),
+    row({ question_text: 'fixed later', outcome: 'correct', answered_at: daysAgo(2) }),   // no longer a problem
+    row({ question_text: 'partly', outcome: 'partially_correct', answered_at: daysAgo(8), level: 'Expert' }),
+    row({ question_text: 'missed recently', outcome: 'incorrect', answered_at: daysAgo(1) }),
+    row({ question_text: 'skipped long ago', outcome: 'idk', answered_at: daysAgo(7) }),
+    row({ question_text: 'solid', outcome: 'correct', answered_at: daysAgo(6) }),
+  ];
+  const { retry, totalToRetry } = computeSkillReview(rows, { now: NOW });
+  assert.deepEqual(retry.map((r) => r.text), ['skipped long ago', 'missed recently', 'partly']);
+  assert.equal(totalToRetry, 3);
+  assert.equal(retry[2].level, 'Expert');
+  assert.equal(retry[0].level, null);
+});
+
+test('retry list counts how often a question was missed', () => {
+  const rows = [
+    row({ question_text: 'again and again', outcome: 'incorrect', answered_at: daysAgo(6) }),
+    row({ question_text: 'again and again', outcome: 'idk', answered_at: daysAgo(4) }),
+    row({ question_text: 'again and again', outcome: 'partially_correct', answered_at: daysAgo(3) }),
+    row({ question_text: 'again and again', outcome: 'incorrect', answered_at: daysAgo(2) }),
+  ];
+  const { retry } = computeSkillReview(rows, { now: NOW });
+  assert.equal(retry.length, 1);
+  assert.equal(retry[0].timesMissed, 3); // the partly right attempt is not counted as a miss
+});
+
+test('retry list is capped at 10 but reports the full count', () => {
+  const rows = Array.from({ length: 15 }, (_, i) => row({ question_text: `q ${i}`, outcome: 'incorrect', answered_at: daysAgo(10 - (i % 5)) }));
+  const review = computeSkillReview(rows, { now: NOW });
+  assert.equal(review.retry.length, 10);
+  assert.equal(review.totalToRetry, 15);
+});
+
+test('study sheet shows more concepts than the overview does', () => {
+  const rows = Array.from({ length: 7 }, (_, i) => row({ concepts_to_review: JSON.stringify([`Concept ${i}`]), answered_at: daysAgo(i) }));
+  assert.equal(computeInsights(rows, { now: NOW }).gaps.length, 5);
+  assert.equal(computeSkillReview(rows, { now: NOW }).gaps.length, 7);
 });

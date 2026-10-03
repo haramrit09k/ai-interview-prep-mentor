@@ -92,3 +92,25 @@ export interface Insights {
   };
   nextStep: { type: string; title: string; detail: string };
 }
+
+/** A question worth another try, taken from the user's recorded answers. */
+export interface ReviewQuestion {
+  text: string;
+  outcome: 'incorrect' | 'idk' | 'partially_correct';
+  level: ExperienceLevel | null; // null when the level was not recorded
+  timesMissed: number;
+  lastAnswered: string;
+}
+
+/** The per-skill study sheet returned by /api/review/:skillId. */
+export interface SkillReview {
+  hasData: boolean;
+  skill: { skillId: string; name: string; attempts: number; accuracy: number | null; trend: Trend; lastPracticed: string; firstPracticed: string } | null;
+  counts: { answers: number; correct: number; partial: number; missed: number };
+  gaps: { concept: string; timesMissed: number; skill: string; lastSeen: string }[];
+  mastered: { concept: string; skill: string; masteredAt: string; previouslyMissed: number }[];
+  retry: ReviewQuestion[];
+  totalToRetry: number;
+  /** A summary written by the old AI-based review, kept so nothing is lost. */
+  previousSummary: { conceptsKnown: string; conceptsToReview: string; lastUpdated?: string } | null;
+}

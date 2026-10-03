@@ -5,17 +5,15 @@ process.env.GEMINI_API_KEY = 'not-a-real-key';
 process.env.NODE_ENV = 'test';
 
 const {
-  buildQuestionsPrompt, buildEvaluationPrompt, buildSummaryPrompt, TRANSCRIPTION_PROMPT, FORMATTING_RULES,
+  buildQuestionsPrompt, buildEvaluationPrompt, TRANSCRIPTION_PROMPT, FORMATTING_RULES,
   LIMITS, LEVELS, SPOKEN_NOTE, stripTags, cleanLine, cleanBlock,
 } = require('../server/prompts');
 
 test('the real service modules load (no stubs), so syntax errors in them cannot hide', () => {
   const gemini = require('../server/geminiService');
-  const summary = require('../server/summaryService');
   assert.equal(typeof gemini.generateQuestionsForSkill, 'function');
   assert.equal(typeof gemini.evaluateAnswer, 'function');
   assert.equal(typeof gemini.transcribeAudio, 'function');
-  assert.equal(typeof summary.generateRevisionSummary, 'function');
 });
 
 test('formatting rules forbid LaTeX and ask for inline code', () => {
@@ -104,9 +102,8 @@ test('an empty answer gets the shorter "I don\'t know" instructions', () => {
   assert.match(buildEvaluationPrompt('q', 'a real answer'), /<user_answer>/);
 });
 
-test('concept naming guidance is in both prompts that produce concepts', () => {
+test('concept naming guidance is in the evaluation prompt, which produces the concepts', () => {
   assert.match(buildEvaluationPrompt('q', 'a'), /Concept names: 1 to 4 words in Title Case/);
-  assert.match(buildSummaryPrompt('Go', ['q'], []), /Concept names: 1 to 4 words in Title Case/);
 });
 
 // ---------- grading rubric ----------
@@ -181,19 +178,6 @@ test('questions prompt uses level specific guidance and asks for plain text', ()
   assert.match(entry, /plain text.*no numbering, Markdown or LaTeX/);
 });
 
-test('summary prompt handles empty lists on either side and bounds big ones', () => {
-  const both = buildSummaryPrompt('Go', ['What is a goroutine?'], ['What is a channel?']);
-  assert.match(both, /<known_questions>\n- What is a goroutine\?\n<\/known_questions>/);
-  assert.match(both, /<unknown_questions>\n- What is a channel\?\n<\/unknown_questions>/);
-  assert.match(both, /Do not use Markdown or LaTeX/);
-  assert.match(buildSummaryPrompt('Go', [], ['q']), /did not have any questions they knew/);
-  assert.match(buildSummaryPrompt('Go', ['q'], []), /did not have any questions they did not know/);
-
-  const huge = Array.from({ length: 500 }, () => 'z'.repeat(2000));
-  const big = buildSummaryPrompt('Go', huge, huge);
-  assert.equal((big.match(/^- z+/gm) || []).length, LIMITS.SUMMARY_ITEMS * 2);
-});
-
 test('transcription prompt keeps filler words verbatim', () => {
   assert.match(TRANSCRIPTION_PROMPT, /filler words \(um, uh, like, you know\)/);
   assert.match(TRANSCRIPTION_PROMPT, /Do not correct grammar/);
@@ -209,13 +193,10 @@ test('worst case prompt sizes stay within budget', () => {
   const recent = Array.from({ length: 50 }, () => 'q'.repeat(1000));
   const questions = buildQuestionsPrompt('s'.repeat(1000), 'Expert', 1000, recent);
   const evaluation = buildEvaluationPrompt('q'.repeat(5000), 'a'.repeat(20000));
-  const huge = Array.from({ length: 500 }, () => 'z'.repeat(2000));
-  const summary = buildSummaryPrompt('s'.repeat(1000), huge, huge);
 
-  console.log(`  worst case tokens (approx): questions ${approxTokens(questions)}, evaluation ${approxTokens(evaluation)}, summary ${approxTokens(summary)}`);
+  console.log(`  worst case tokens (approx): questions ${approxTokens(questions)}, evaluation ${approxTokens(evaluation)}`);
   assert.ok(approxTokens(questions) <= 650, 'questions prompt');
   assert.ok(approxTokens(evaluation) <= 2250, 'evaluation prompt'); // mostly the 5000 character answer cap
-  assert.ok(approxTokens(summary) <= 2100, 'summary prompt');
 });
 
 test('typical prompts are small', () => {

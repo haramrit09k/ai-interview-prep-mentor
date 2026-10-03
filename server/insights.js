@@ -103,7 +103,7 @@ function computeSkills(rows, nowMs) {
     .sort((a, b) => b.attempts - a.attempts);
 }
 
-function computeConcepts(rows) {
+function computeConcepts(rows, limit = 5) {
   const concepts = new Map();
   for (const row of rows) {
     const context = { skill: row.skill_name, at: row.answered_at };
@@ -130,12 +130,12 @@ function computeConcepts(rows) {
   const gaps = all
     .filter((c) => c.state === 'review')
     .sort((a, b) => b.missed - a.missed || Date.parse(b.lastSeen.at) - Date.parse(a.lastSeen.at))
-    .slice(0, 5)
+    .slice(0, limit)
     .map((c) => ({ concept: c.label, timesMissed: c.missed, skill: c.lastSeen.skill, lastSeen: c.lastSeen.at }));
   const mastered = all
     .filter((c) => c.state === 'known' && c.missed > 0)
     .sort((a, b) => Date.parse(b.masteredAt) - Date.parse(a.masteredAt))
-    .slice(0, 5)
+    .slice(0, limit)
     .map((c) => ({ concept: c.label, skill: c.lastSeen.skill, masteredAt: c.masteredAt, previouslyMissed: c.missed }));
   return { gaps, mastered };
 }
@@ -258,4 +258,54 @@ function computeInsights(rows, { now = Date.now(), tzOffsetMinutes = 0 } = {}) {
   };
 }
 
-module.exports = { computeInsights };
+const RETRY_LIMIT = 10;
+const REVIEW_CONCEPT_LIMIT = 8;
+// Questions whose latest answer was not fully right. Wrong or skipped ones come before partly right ones.
+const RETRY_PRIORITY = { incorrect: 0, idk: 0, partially_correct: 1 };
+
+/**
+ * A study sheet for one skill, built from every answer recorded for it.
+ * @param {Array} rows Answer log rows for this one skill, oldest first.
+ */
+function computeSkillReview(rows, { now = Date.now() } = {}) {
+  const sorted = [...rows].sort((a, b) => Date.parse(a.answered_at) - Date.parse(b.answered_at));
+  if (sorted.length === 0) {
+    return { hasData: false, skill: null, counts: { answers: 0, correct: 0, partial: 0, missed: 0 }, gaps: [], mastered: [], retry: [], totalToRetry: 0 };
+  }
+
+  const skill = computeSkills(sorted, now)[0];
+  const { gaps, mastered } = computeConcepts(sorted, REVIEW_CONCEPT_LIMIT);
+
+  // Latest result per question: a question you missed once and then got right is no longer a problem.
+  const byQuestion = new Map();
+  for (const row of sorted) {
+    const entry = byQuestion.get(row.question_text) || { timesMissed: 0 };
+    if (row.outcome === 'incorrect' || row.outcome === 'idk') entry.timesMissed += 1;
+    entry.outcome = row.outcome;
+    entry.lastAnswered = row.answered_at;
+    entry.level = row.level || null;
+    byQuestion.set(row.question_text, entry);
+  }
+  const needsWork = [...byQuestion.entries()]
+    .filter(([, e]) => e.outcome in RETRY_PRIORITY)
+    .map(([text, e]) => ({ text, outcome: e.outcome, level: e.level, timesMissed: e.timesMissed, lastAnswered: e.lastAnswered }))
+    // most serious first; within a group, the one you saw longest ago is the most due
+    .sort((a, b) => RETRY_PRIORITY[a.outcome] - RETRY_PRIORITY[b.outcome] || Date.parse(a.lastAnswered) - Date.parse(b.lastAnswered));
+
+  return {
+    hasData: true,
+    skill: { ...skill, firstPracticed: sorted[0].answered_at },
+    counts: {
+      answers: sorted.length,
+      correct: sorted.filter((r) => r.outcome === 'correct').length,
+      partial: sorted.filter((r) => r.outcome === 'partially_correct').length,
+      missed: sorted.filter((r) => r.outcome === 'incorrect' || r.outcome === 'idk').length,
+    },
+    gaps,
+    mastered,
+    retry: needsWork.slice(0, RETRY_LIMIT),
+    totalToRetry: needsWork.length,
+  };
+}
+
+module.exports = { computeInsights, computeSkillReview };

@@ -9,15 +9,13 @@ const LIMITS = {
   MAX_QUESTIONS: 15, // the largest session the UI offers
   AVOID_ITEMS: 10, // recent questions passed along so the model does not repeat them
   AVOID_ITEM_CHARS: 100, // a question's opening words are enough to avoid repeating it
-  SUMMARY_ITEMS: 15, // a session has at most 15 questions
-  SUMMARY_ITEM_CHARS: 200,
 };
 
 const LEVELS = ['Entry-level', 'Mid-level', 'Expert'];
 
 // User-written text is wrapped in these tags. If the text contains one of the tags itself, it could
 // "close" the data section early and pass off its own words as instructions, so the tags are removed.
-const TAGS = ['skill_name', 'question', 'user_answer', 'recent_questions', 'known_questions', 'unknown_questions'];
+const TAGS = ['skill_name', 'question', 'user_answer', 'recent_questions'];
 const TAG_PATTERN = new RegExp(`<\\/?\\s*(?:${TAGS.join('|')})\\s*>`, 'gi');
 
 const stripTags = (value) => {
@@ -190,50 +188,10 @@ const EVALUATION_OUTPUT = `Return a JSON object with five keys:
 - "conceptsKnown": An array of strings, listing concepts the user demonstrated understanding of.
 - "conceptsToReview": An array of strings, listing concepts the user missed or should review.`;
 
-/** Asks for a short revision summary from the questions a user knew and did not know. */
-const buildSummaryPrompt = (skillName, knownQuestions, unknownQuestions) => {
-  const known = bulletList(knownQuestions, LIMITS.SUMMARY_ITEMS, LIMITS.SUMMARY_ITEM_CHARS);
-  const unknown = bulletList(unknownQuestions, LIMITS.SUMMARY_ITEMS, LIMITS.SUMMARY_ITEM_CHARS);
-  const skill = cleanLine(skillName, LIMITS.SKILL_NAME);
-
-  let prompt = `You are an expert learning assistant. A user has practiced the skill in <skill_name> and you need to create a revision summary based on their performance.
-
-<skill_name>${skill}</skill_name>
-
-I will provide you with lists of questions based on their answers.
-
-Your task is to:
-- Analyze the questions, considering the skill in <skill_name>.
-- Identify the core concepts or topics being tested. Return the concepts as an array of strings.
-- Each item in the array should be a key concept or topic, not a detailed explanation.
-- The summary should synthesize the underlying topics, not just list questions.
-- Aim for 1-3 concepts per section, if possible.
-- Write each concept as short plain text. Do not use Markdown or LaTeX.
-
-${CONCEPT_NAMING}
-
-`;
-
-  prompt += known
-    ? `Questions the user KNEW:\n<known_questions>\n${known}\n</known_questions>\n\n`
-    : `The user did not have any questions they knew.\n\n`;
-
-  prompt += unknown
-    ? `Questions the user DID NOT KNOW:\n<unknown_questions>\n${unknown}\n</unknown_questions>\n\n`
-    : `The user did not have any questions they did not know.\n\n`;
-
-  prompt += `${UNTRUSTED_NOTICE('<skill_name>, <known_questions> and <unknown_questions>')}
-
-Return a JSON object with two keys:
-- "conceptsKnown": An array of strings, representing concepts the user is comfortable with. If there were no known questions, return an empty array.
-- "conceptsToReview": An array of strings, representing concepts the user should focus on for revision. If there were no unknown questions, return an empty array.`;
-  return prompt;
-};
-
 /** Verbatim transcription. Fillers are kept on purpose because delivery coaching counts them. */
 const TRANSCRIPTION_PROMPT = `Transcribe this audio exactly as spoken, word for word. Keep filler words (um, uh, like, you know), repeated words and false starts exactly as they were said. Do not correct grammar, rephrase or summarise. Use basic punctuation only. If there is no intelligible speech, return an empty transcript. Return JSON with one key, "transcript".`;
 
 module.exports = {
-  buildQuestionsPrompt, buildEvaluationPrompt, buildSummaryPrompt, TRANSCRIPTION_PROMPT,
+  buildQuestionsPrompt, buildEvaluationPrompt, TRANSCRIPTION_PROMPT,
   FORMATTING_RULES, GRADING_RUBRIC, SPOKEN_NOTE, LIMITS, LEVELS, cleanLine, cleanBlock, stripTags,
 };

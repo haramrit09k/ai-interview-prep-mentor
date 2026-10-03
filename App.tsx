@@ -1,12 +1,12 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import useLocalStorage from './hooks/useLocalStorage';
-import type { Skill, Question, AnswerOutcome, ExperienceLevel, AnswerHistory, UserProfile } from './types';
+import type { Skill, Question, AnswerOutcome, ExperienceLevel, ReviewQuestion, UserProfile } from './types';
 
 import SkillManagement from './components/SkillManagement';
 import PracticeView from './components/PracticeView';
 import CustomQuestionModal from './components/CustomQuestionModal';
 import StartPracticeModal from './components/StartPracticeModal';
-import RevisionSummaryModal from './components/RevisionSummaryModal';
+import ReviewModal from './components/ReviewModal';
 import Header from './components/Header';
 import { LimitReachedModal } from './components/LimitReachedModal';
 import { WelcomeModal } from './components/WelcomeModal';
@@ -43,7 +43,6 @@ const QUESTIONS_LIMIT_AUTH = 50;
 // --- STABLE EMPTY ARRAY REFERENCES TO PREVENT RE-RENDERS ---
 const EMPTY_SKILLS: Skill[] = [];
 const EMPTY_QUESTIONS: Question[] = [];
-const EMPTY_HISTORY: AnswerHistory[] = [];
 
 // ===================================================================================
 // IMPORTANT: REPLACE WITH YOUR GOOGLE CLOUD OAUTH 2.0 CLIENT ID
@@ -70,12 +69,10 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   // Define dynamic storage keys based on user ID
   const skillsKey = `interview_prep_skills_${userId}`;
   const questionsKey = `interview_prep_custom_questions_${userId}`;
-  const historyKey = `interview_prep_answer_history_${userId}`;
 
   // --- STATE HOOKS ---
   const [skills, setSkills] = useLocalStorage<Skill[]>(skillsKey, EMPTY_SKILLS);
   const [customQuestions, setCustomQuestions] = useLocalStorage<Question[]>(questionsKey, EMPTY_QUESTIONS);
-  const [answerHistory, setAnswerHistory] = useLocalStorage<AnswerHistory[]>(historyKey, EMPTY_HISTORY);
   
   // --- STATE FOR QUOTA MANAGEMENT ---
   const [anonSessionsUsed, setAnonSessionsUsed] = useLocalStorage<number>('interview_prep_anon_sessions_used', 0);
@@ -145,13 +142,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const [isCustomQuestionModalOpen, setIsCustomQuestionModalOpen] = useState<boolean>(false);
   const [limitModal, setLimitModal] = useState<{ isOpen: boolean; reason: 'skills' | 'sessions' | 'quota' | null }>({ isOpen: false, reason: null });
   const [practiceOptions, setPracticeOptions] = useState<{ isOpen: boolean; skill: Skill | null }>({ isOpen: false, skill: null });
-  const [revisionModal, setRevisionModal] = useState<{ isOpen: boolean; skill: Skill | null }>({ isOpen: false, skill: null });
-
-  // Create a ref to hold the latest answer history to avoid stale closures in callbacks
-  const answerHistoryRef = useRef(answerHistory);
-  useEffect(() => {
-    answerHistoryRef.current = answerHistory;
-  }, [answerHistory]);
+  const [reviewModal, setReviewModal] = useState<{ isOpen: boolean; skill: Skill | null }>({ isOpen: false, skill: null });
 
   const handleLoginSuccess = useCallback((credentialResponse: any) => {
     try {
@@ -172,7 +163,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         setLimitModal({ isOpen: false, reason: null });
         setPracticeOptions({ isOpen: false, skill: null });
         setIsCustomQuestionModalOpen(false);
-        setRevisionModal({ isOpen: false, skill: null });
+        setReviewModal({ isOpen: false, skill: null });
         setIsWelcomeModalOpen(false);
         setShowPurchaseModal(false);
 
@@ -180,7 +171,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         console.error("Error decoding JWT:", error);
         alert("Failed to process login information.");
     }
-  }, [setUserProfile, setLimitModal, setPracticeOptions, setIsCustomQuestionModalOpen, setRevisionModal, setIsWelcomeModalOpen, setShowPurchaseModal]);
+  }, [setUserProfile, setLimitModal, setPracticeOptions, setIsCustomQuestionModalOpen, setReviewModal, setIsWelcomeModalOpen, setShowPurchaseModal]);
 
   
 
@@ -219,9 +210,8 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     if (window.confirm('Are you sure you want to delete this skill and all associated questions and history?')) {
       setSkills(prev => prev.filter(skill => skill.id !== id));
       setCustomQuestions(prev => prev.filter(q => q.skillId !== id));
-      setAnswerHistory(prev => prev.filter(h => h.skillId !== id));
     }
-  }, [setSkills, setCustomQuestions, setAnswerHistory]);
+  }, [setSkills, setCustomQuestions]);
   
   const addCustomQuestion = (skillId: string, text: string, answer: string) => {
     const newQuestion: Question = { id: uuidv4(), skillId, text, answer, source: 'custom' };
@@ -313,6 +303,25 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     }
   }, [customQuestions, isAuthenticated, sessionsRemaining, setAnonSessionsUsed]);
 
+  // Starts a session made of questions the user missed earlier. Their grading level is kept when it was recorded.
+  const handleRetryMissed = useCallback((skill: Skill, retry: ReviewQuestion[]) => {
+    if (!isAuthenticated || retry.length === 0) return;
+    const questions: Question[] = retry.map((q) => ({
+      id: uuidv4(),
+      skillId: skill.id,
+      text: q.text,
+      source: 'gemini',
+      level: q.level ?? undefined,
+    }));
+    setReviewModal({ isOpen: false, skill: null });
+    setPracticeSession({
+      skill,
+      questions: shuffleArray(questions),
+      currentQuestionIndex: 0,
+      consumedQuestionIds: new Set(),
+    });
+  }, [isAuthenticated]);
+
   const practiceSessionRef = useRef(practiceSession);
   useEffect(() => {
     practiceSessionRef.current = practiceSession;
@@ -332,16 +341,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         if (isAuthenticated && localStorage.getItem('google_id_token')) {
             const unansweredQuestions = practiceSessionRef.current.questions.filter(q => !practiceSessionRef.current?.consumedQuestionIds.has(q.id));
 
-            const payload = {
-                unansweredQuestions,
-                // Include summary data directly to avoid relying on a separate async call
-                summaryData: {
-                    skillId: practiceSessionRef.current?.skill.id,
-                    skillName: practiceSessionRef.current?.skill.name,
-                    // Use the ref for the most up-to-date history
-                    history: answerHistoryRef.current.filter(h => h.skillId === practiceSessionRef.current?.skill.id),
-                }
-            }
+            const payload = { unansweredQuestions };
 
             const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
             navigator.sendBeacon('/api/session/save-on-exit', blob);
@@ -354,12 +354,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isAuthenticated, answerHistoryRef]); // Dependencies
+  }, [isAuthenticated]); // Dependencies
 
   const endPracticeSession = useCallback(async () => {
     if (practiceSession && isAuthenticated) {
       if (!localStorage.getItem('google_id_token')) {
-        logger.warn('Authenticated user but no Google ID token found in localStorage. Cannot save unanswered questions or generate summary.');
+        logger.warn('Authenticated user but no Google ID token found in localStorage. Cannot save unanswered questions.');
         setPracticeSession(null);
         return;
       }
@@ -380,43 +380,6 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         } catch (error) {
           logger.error('Error saving unanswered questions:', error);
         }
-      }
-
-      // Generate and save revision summary
-      const relevantHistory = answerHistoryRef.current.filter(h => h.skillId === practiceSession.skill.id);
-      const knownQuestions: string[] = [];
-      const unknownQuestions: string[] = [];
-      
-      relevantHistory.forEach(entry => {
-        if (entry.outcome === 'correct' || entry.outcome === 'partially_correct') {
-          knownQuestions.push(entry.questionText);
-        } else {
-          unknownQuestions.push(entry.questionText);
-        }
-      });
-
-      try {
-        const response = await fetch('/api/revision-summary', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`,
-          },
-          body: JSON.stringify({
-            skillId: practiceSession.skill.id,
-            skillName: practiceSession.skill.name,
-            knownQuestions,
-            unknownQuestions,
-          }),
-        });
-
-        if (!response.ok) {
-          logger.error('Failed to save revision summary:', await readErrorMessage(response, 'Request failed'));
-        } else {
-          logger.info(`Revision summary saved for skill ${practiceSession.skill.name} for user ${userId}.`);
-        }
-      } catch (error) {
-        logger.error('Error saving revision summary:', error);
       }
     }
     setPracticeSession(null);
@@ -479,17 +442,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             return skill;
         })
     );
-    
-    const historyEntry: AnswerHistory = {
-        skillId: question.skillId,
-        questionText: question.text,
-        outcome: classification,
-        conceptsKnown: conceptsKnown || [],
-        conceptsToReview: conceptsToReview || []
-    };
-    setAnswerHistory(prev => [...prev, historyEntry]);
-
-  }, [isAuthenticated, practiceSession, setAuthQuota, setPracticeSession, setSkills, setAnswerHistory]);
+  }, [isAuthenticated, practiceSession, setAuthQuota, setPracticeSession, setSkills]);
 
   const handlePurchaseQuestions = useCallback(async (quantity: number, priceCents: number) => {
     if (!isAuthenticated) {
@@ -557,7 +510,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           onDeleteSkill={deleteSkill}
           onOpenPracticeOptions={(skill) => setPracticeOptions({ isOpen: true, skill })}
           onOpenAddQuestionModal={() => setIsCustomQuestionModalOpen(true)}
-          onOpenRevisionSummary={(skill) => setRevisionModal({ isOpen: true, skill })}
+          onOpenReview={(skill) => setReviewModal({ isOpen: true, skill })}
           isSkillLimitReached={isSkillLimitReached}
         />
       </main>
@@ -579,10 +532,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             sessionsRemaining={sessionsRemaining}
         />
       )}
-      {revisionModal.isOpen && revisionModal.skill && (
-        <RevisionSummaryModal
-            skill={revisionModal.skill}
-            onClose={() => setRevisionModal({ isOpen: false, skill: null })}
+      {reviewModal.isOpen && reviewModal.skill && (
+        <ReviewModal
+            skill={reviewModal.skill}
+            isAuthenticated={isAuthenticated}
+            onClose={() => setReviewModal({ isOpen: false, skill: null })}
+            onPractice={(questions) => handleRetryMissed(reviewModal.skill as Skill, questions)}
         />
       )}
       {limitModal.isOpen && limitModal.reason && (
