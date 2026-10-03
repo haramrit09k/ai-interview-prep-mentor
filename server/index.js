@@ -13,7 +13,7 @@ const { LIMITS, LEVELS, cleanBlock } = require('./prompts');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
-const { freshQuestionAllowance, recordGenerated, OPEN_QUESTIONS_BODY, takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, loadQuota, remainingQuestions, chargeForGrading, quotaSnapshot, getStartOfWeek, QUOTA_EXCEEDED_BODY } = require('./quota');
+const { reserveFreshQuestions, releaseFreshQuestions, OPEN_QUESTIONS_BODY, takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, loadQuota, remainingQuestions, chargeForGrading, quotaSnapshot, getStartOfWeek, QUOTA_EXCEEDED_BODY } = require('./quota');
 const { InviteError, createInvite, listInvites, revokeInvite, redeemInvite } = require('./invites');
 const { takeGuestAllowance, refundGuestAllowance, GUEST_LIMIT_BODY, GUEST_MAX_QUESTIONS } = require('./guestLimit');
 const crypto = require('crypto');
@@ -202,12 +202,14 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
         logger.info(`GET /api/questions: Returning ${numToTake} questions from storage for user ${req.userId} and clearing them.`);
       }
 
+      let reserved = 0;
       if (remainingCount > 0) {
         // Only so many generated questions can be waiting unanswered at once. Questions saved from before are
-        // served first (above), so this only limits asking for more while many are still open.
-        const allowed = await freshQuestionAllowance(req.userId);
-        if (allowed <= 0 && questionsToReturn.length === 0) return res.status(403).json(OPEN_QUESTIONS_BODY);
-        remainingCount = Math.min(remainingCount, allowed);
+        // served first (above), so this only limits asking for more while many are still open. The places are
+        // reserved before the model is called, so requests sent at the same moment cannot each get the full allowance.
+        reserved = await reserveFreshQuestions(req.userId, remainingCount);
+        if (reserved <= 0 && questionsToReturn.length === 0) return res.status(403).json(OPEN_QUESTIONS_BODY);
+        remainingCount = reserved;
       }
 
       if (remainingCount > 0) {
@@ -220,9 +222,14 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
         } catch (lookupErr) {
           logger.warn(`GET /api/questions: could not load recent questions for user ${req.userId}: ${lookupErr.message}`);
         }
-        const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount, skillId, avoid);
-        questionsToReturn = [...questionsToReturn, ...newQuestions];
-        await recordGenerated(req.userId, newQuestions.length);
+        try {
+          const newQuestions = await generateQuestionsForSkill(skillName, level, remainingCount, skillId, avoid);
+          questionsToReturn = [...questionsToReturn, ...newQuestions];
+          await releaseFreshQuestions(req.userId, reserved - newQuestions.length); // places the model did not fill
+        } catch (generationError) {
+          await releaseFreshQuestions(req.userId, reserved); // nothing was made, so nothing is used up
+          throw generationError;
+        }
       }
 
       await pool.query('UPDATE users SET unanswered_questions = $1 WHERE id = $2', [JSON.stringify(storedQuestionMap), req.userId]);

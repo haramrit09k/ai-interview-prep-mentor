@@ -9,7 +9,7 @@
 //   - if the AI call fails, the question is given back
 const crypto = require('crypto');
 const pool = require('./db');
-const redisClient = require('./redisClient');
+const { bump, readCounter, takeUpTo, giveBack } = require('./counters');
 const logger = require('./logger');
 
 const DAY_SECONDS = 24 * 60 * 60;
@@ -85,44 +85,62 @@ const QUOTA_EXCEEDED_BODY = {
 const attemptsKey = (userId, questionText) =>
   `gradings:${userId}:${crypto.createHash('sha256').update(String(questionText)).digest('hex')}`;
 
-const readAttempts = async (key) => {
-  try {
-    return parseInt(await redisClient.get(key), 10) || 0;
-  } catch (err) {
-    logger.error('Quota: could not read grading count:', err.message);
-    return 0;
-  }
+const dailyKey = (kind, userId) => `daily:${kind}:${userId}:${new Date().toISOString().slice(0, 10)}`;
+const dailyLimit = (name, fallback) => {
+  const n = parseInt(process.env[name], 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 };
-const writeAttempts = async (key, count, ttl = DAY_SECONDS) => {
-  try {
-    await redisClient.set(key, String(Math.max(0, count)), { EX: ttl });
-  } catch (err) {
-    logger.error('Quota: could not save grading count:', err.message);
-  }
+
+// Generated questions this user has answered today. Each one frees a place for a new question (see below).
+const markGraded = async (userId) => {
+  try { await bump(dailyKey('graded', userId), 1, 2 * DAY_SECONDS); } catch (err) { logger.error('Quota: could not record a graded question:', err.message); }
 };
+const unmarkGraded = (userId) => giveBack(dailyKey('graded', userId), 1, 2 * DAY_SECONDS);
 
 /**
  * Called before a signed in user's answer is graded.
  * Returns { ok: true, release } where release() undoes the charge if grading fails,
  * or { ok: false, status, body } when the user may not have this graded.
+ *
+ * The first grading of a question costs one question. The same question can be graded a few more times
+ * a day for free. Every step uses atomic counters, so requests sent at the same moment cannot each count as
+ * "the first" (and be charged once but graded many times), nor each slip in as a free try.
  */
 async function chargeForGrading(userId, questionText) {
   const key = attemptsKey(userId, questionText);
-  const attempts = await readAttempts(key);
+  const paidKey = `${key}:paid`; // set once the first grading of this question has been paid for
 
-  if (attempts >= MAX_GRADINGS_PER_QUESTION) {
+  let attempt = 1;
+  try {
+    attempt = await bump(key, 1, DAY_SECONDS, { refresh: true });
+  } catch (err) {
+    logger.error('Quota: could not count the grading, treating it as a first try:', err.message);
+  }
+
+  if (attempt > MAX_GRADINGS_PER_QUESTION) {
+    await giveBack(key, 1, DAY_SECONDS);
     return { ok: false, status: 429, body: { error: 'You have tried this question several times today. Move on to the next one, and come back to it tomorrow.', code: 'QUESTION_REPEAT_LIMIT' } };
   }
 
   let source = null;
-  if (attempts === 0) {
+  if (attempt === 1) {
     source = await spendQuestion(userId);
-    if (!source) return { ok: false, status: 403, body: QUOTA_EXCEEDED_BODY };
+    if (!source) {
+      await giveBack(key, 1, DAY_SECONDS);
+      return { ok: false, status: 403, body: QUOTA_EXCEEDED_BODY };
+    }
+    try { await bump(paidKey, 1, DAY_SECONDS, { refresh: true }); } catch (err) { logger.error('Quota: could not mark the question as paid:', err.message); }
+    await markGraded(userId); // answering a question frees a place for a new one
   } else {
-    // A free try of a question already paid for today. Someone with no questions left can still use these.
+    // A free try of a question already paid for today. Someone with no questions left can still use these,
+    // but only once the first grading has really been paid for, so a burst of requests cannot get in ahead of it.
+    let paid = true;
+    try { paid = (await readCounter(paidKey)) > 0; } catch (err) { logger.error('Quota: could not read the paid mark:', err.message); }
+    if (!paid) {
+      await giveBack(key, 1, DAY_SECONDS);
+      return { ok: false, status: 409, body: { error: 'This question is still being graded. Wait a moment, then try again.', code: 'GRADING_IN_PROGRESS' } };
+    }
   }
-  await writeAttempts(key, attempts + 1);
-  if (source) await adjustGraded(userId, 1); // answering a question frees a place for a new one
 
   return {
     ok: true,
@@ -130,9 +148,10 @@ async function chargeForGrading(userId, questionText) {
       try {
         if (source) {
           await refundQuestion(userId, source);
-          await adjustGraded(userId, -1);
+          await unmarkGraded(userId);
+          await giveBack(paidKey, 1, DAY_SECONDS);
         }
-        await writeAttempts(key, attempts);
+        await giveBack(key, 1, DAY_SECONDS);
       } catch (err) {
         logger.error(`Quota: could not give back a question for user ${userId}:`, err.message);
       }
@@ -147,26 +166,14 @@ const VOICE_LIMIT_BODY = {
 
 // Voice answers are graded (and charged) like any other, so a recording is not charged a second time.
 // It is still the most expensive request we accept, so each user gets a daily number of them.
-const dailyKey = (kind, userId) => `daily:${kind}:${userId}:${new Date().toISOString().slice(0, 10)}`;
-const dailyLimit = (name, fallback) => {
-  const n = parseInt(process.env[name], 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-};
 
 /** Uses up one of a user's daily voice recordings. Returns false when they have none left today. */
 async function takeDailyVoice(userId) {
-  const key = dailyKey('voice', userId);
-  const used = await readAttempts(key);
-  if (used >= dailyLimit('VOICE_DAILY_LIMIT', 60)) return false;
-  await writeAttempts(key, used + 1, 2 * DAY_SECONDS);
-  return true;
+  return (await takeUpTo(dailyKey('voice', userId), 1, dailyLimit('VOICE_DAILY_LIMIT', 60), 2 * DAY_SECONDS)) === 1;
 }
 
 /** Gives a recording back after transcription failed. */
-async function refundDailyVoice(userId) {
-  const key = dailyKey('voice', userId);
-  await writeAttempts(key, (await readAttempts(key)) - 1, 2 * DAY_SECONDS);
-}
+const refundDailyVoice = (userId) => giveBack(dailyKey('voice', userId), 1, 2 * DAY_SECONDS);
 
 // Generating questions is what costs the most (one model call can return 15), and nothing is charged for it, so
 // without a limit someone could generate questions all day, answer them somewhere else, and never spend a question.
@@ -180,23 +187,18 @@ const OPEN_QUESTIONS_BODY = {
   code: 'OPEN_QUESTIONS_LIMIT',
 };
 
-/** How many new questions can be generated for this user right now. */
-async function freshQuestionAllowance(userId) {
-  const generated = await readAttempts(dailyKey('generated', userId));
-  const graded = await readAttempts(dailyKey('graded', userId));
-  const open = Math.max(0, generated - graded);
-  return Math.max(0, openLimit() - open);
+/**
+ * Reserves places for `wanted` new questions, before the model is called, and returns how many were granted (it
+ * can be fewer, or none). The places are taken first and any excess is given back, so many requests at the same
+ * moment cannot each be granted the full allowance. Call releaseFreshQuestions for places that were not used.
+ */
+async function reserveFreshQuestions(userId, wanted) {
+  let graded = 0;
+  try { graded = await readCounter(dailyKey('graded', userId)); } catch (err) { logger.error('Quota: could not read the graded count:', err.message); }
+  return takeUpTo(dailyKey('generated', userId), wanted, openLimit() + graded, 2 * DAY_SECONDS);
 }
 
-async function recordGenerated(userId, count) {
-  const key = dailyKey('generated', userId);
-  await writeAttempts(key, (await readAttempts(key)) + count, 2 * DAY_SECONDS);
-}
-
-const adjustGraded = async (userId, change) => {
-  const key = dailyKey('graded', userId);
-  await writeAttempts(key, (await readAttempts(key)) + change, 2 * DAY_SECONDS);
-};
+const releaseFreshQuestions = (userId, count) => giveBack(dailyKey('generated', userId), count, 2 * DAY_SECONDS);
 
 /** The numbers the app needs to stay in step with the server. */
 async function quotaSnapshot(userId) {
@@ -204,4 +206,4 @@ async function quotaSnapshot(userId) {
   return { questionsUsed: quota.questionsUsed, bonusQuestions: quota.bonusQuestions };
 }
 
-module.exports = { freshQuestionAllowance, recordGenerated, OPEN_QUESTIONS_BODY, takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, getStartOfWeek, loadQuota, remainingQuestions, spendQuestion, refundQuestion, chargeForGrading, quotaSnapshot, QUOTA_EXCEEDED_BODY, weeklyLimit };
+module.exports = { reserveFreshQuestions, releaseFreshQuestions, OPEN_QUESTIONS_BODY, takeDailyVoice, refundDailyVoice, VOICE_LIMIT_BODY, getStartOfWeek, loadQuota, remainingQuestions, spendQuestion, refundQuestion, chargeForGrading, quotaSnapshot, QUOTA_EXCEEDED_BODY, weeklyLimit };

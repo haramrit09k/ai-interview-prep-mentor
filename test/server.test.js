@@ -43,6 +43,9 @@ const cache = new Map();
 stub('redisClient.js', {
   get: async (k) => cache.get(k) ?? null,
   set: async (k, v) => { cache.set(k, v); },
+  // Like Redis, adding to a counter is one step with nothing in between, which the limits rely on.
+  incrBy: async (k, d) => { const v = (parseInt(cache.get(k), 10) || 0) + d; cache.set(k, String(v)); return v; },
+  expire: async () => 1,
 });
 stub('rateLimiter.js', { rateLimiter: (req, res, next) => next() });
 
@@ -53,6 +56,7 @@ let questionCalls = [];
 stub('geminiService.js', {
   generateQuestionsForSkill: async (...args) => {
     questionCalls.push(args);
+    if (geminiMode === 'fail') throw new Error('model down');
     return Array.from({ length: args[2] }, (_, i) => ({ text: i === 0 ? 'fresh question' : `fresh question ${i + 1}`, level: args[1], skillId: args[3] }));
   },
   evaluateAnswer: async (...args) => {
@@ -325,7 +329,7 @@ test('success responses are not labelled as errors', async () => {
 });
 
 test('guests get a limited number of rounds and graded answers per network, and signed in users are not counted', async () => {
-  const clearGuestKeys = () => { for (const k of [...cache.keys()]) if (k.startsWith('guest:')) cache.delete(k); };
+  const clearGuestKeys = () => { for (const k of [...cache.keys()]) if (k.startsWith('guest')) cache.delete(k); };
   const guestUrl = '/api/questions?skillName=Java&level=Mid-level&skillId=java&count=5';
   clearGuestKeys();
   process.env.GUEST_SESSIONS_LIMIT = '2';
@@ -750,5 +754,68 @@ test('open questions: saved questions are still shown first when the limit is re
   } finally {
     geminiMode = 'ok';
     delete process.env.OPEN_QUESTIONS_LIMIT;
+  }
+});
+
+test('limits hold when many requests arrive at the same moment', async () => {
+  // generating questions: ten requests at once must not each get the full allowance
+  process.env.OPEN_QUESTIONS_LIMIT = '10';
+  try {
+    const user = 'burst@example.test';
+    const burst = await Promise.all(Array.from({ length: 10 }, () =>
+      call('GET', '/api/questions?skillName=Java&level=Mid-level&skillId=burst&count=5', { token: user })));
+    let generated = 0;
+    for (const res of burst) if (res.status === 200) generated += (await res.json()).questions.length;
+    assert.equal(generated, 10); // exactly the allowance, not 50
+    assert.equal(burst.filter((r) => r.status === 403).length, 8);
+
+    // a failed generation gives its places back
+    const failing = 'burst-failing@example.test';
+    geminiMode = 'fail';
+    assert.equal((await call('GET', '/api/questions?skillName=Java&level=Mid-level&skillId=f&count=5', { token: failing })).status, 500);
+    geminiMode = 'ok';
+    assert.equal((await (await call('GET', '/api/questions?skillName=Java&level=Mid-level&skillId=f&count=10', { token: failing })).json()).questions.length, 10);
+  } finally {
+    geminiMode = 'ok';
+    delete process.env.OPEN_QUESTIONS_LIMIT;
+  }
+
+  // free tries of a question: a burst of "retries" for a question that was never paid for cannot all go through
+  process.env.WEEKLY_QUESTION_LIMIT = '1';
+  try {
+    const user = 'burst-retry@example.test';
+    assert.equal((await grade(user, 'paid question')).status, 200); // the only question is spent
+    const retries = await Promise.all(Array.from({ length: 10 }, () => grade(user, 'paid question', { isRetry: true })));
+    assert.equal(retries.filter((r) => r.status === 200).length, 3); // 3 free tries, as designed
+    assert.equal(retries.filter((r) => r.status === 429).length, 7);
+
+    // ten at once for a new question with nothing left to pay with: none are graded
+    const unpaid = await Promise.all(Array.from({ length: 10 }, () => grade(user, 'never paid for', { isRetry: true })));
+    assert.equal(unpaid.filter((r) => r.status === 200).length, 0);
+
+    // and ten at once for a new question, with questions to spare, charge exactly one
+    process.env.WEEKLY_QUESTION_LIMIT = '50';
+    const fresh = 'burst-fresh@example.test';
+    const all = await Promise.all(Array.from({ length: 10 }, () => grade(fresh, 'one question, many requests')));
+    assert.ok(all.filter((r) => r.status === 200).length >= 1);
+    assert.equal((await (await call('GET', '/api/quota', { token: fresh })).json()).questionsUsed, 1);
+  } finally {
+    delete process.env.WEEKLY_QUESTION_LIMIT;
+  }
+
+  // voice recordings and guest rounds at the same moment
+  process.env.VOICE_DAILY_LIMIT = '3';
+  process.env.GUEST_SESSIONS_LIMIT = '2';
+  try {
+    const voices = await Promise.all(Array.from({ length: 10 }, () => record('burst-voice@example.test')));
+    assert.equal(voices.filter((r) => r.status === 200).length, 3);
+    for (const k of [...cache.keys()]) if (k.startsWith('guest')) cache.delete(k);
+    const guests = await Promise.all(Array.from({ length: 10 }, () =>
+      call('GET', '/api/questions?skillName=Java&level=Mid-level&skillId=g&count=5')));
+    assert.equal(guests.filter((r) => r.status === 200).length, 2);
+  } finally {
+    delete process.env.VOICE_DAILY_LIMIT;
+    process.env.GUEST_SESSIONS_LIMIT = '1000';
+    for (const k of [...cache.keys()]) if (k.startsWith('guest')) cache.delete(k);
   }
 });

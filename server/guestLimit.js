@@ -6,8 +6,7 @@
 //
 // Trade-off: people on the same network (an office, a university, a mobile carrier) share one allowance.
 // That is acceptable for a free trial, and the numbers can be changed with environment variables.
-const redisClient = require('./redisClient');
-const logger = require('./logger');
+const { takeUpTo, giveBack } = require('./counters');
 
 const DAY_SECONDS = 24 * 60 * 60;
 const GUEST_MAX_QUESTIONS = 5; // questions in one guest round
@@ -24,6 +23,11 @@ const limitFor = (kind) => (kind === 'sessions'
   : readNumber('GUEST_EVALUATIONS_LIMIT', 20));
 const windowSeconds = () => readNumber('GUEST_WINDOW_DAYS', 30) * DAY_SECONDS;
 
+// The counters are atomic (see counters.js): requests sent at the same moment each take their own place in
+// line, so firing many at once cannot get past the limit. They use new key names (guestc:) because the first
+// version of this limit stored a JSON record under guest:..., which a counter cannot be added to.
+const counterKey = (req, kind) => `guestc:${kind}:${req.ip}`;
+
 /**
  * Uses up one unit of a guest's allowance. Returns false when they have none left.
  * Signed in users always pass. If Redis is unavailable we let the request through rather than
@@ -32,37 +36,14 @@ const windowSeconds = () => readNumber('GUEST_WINDOW_DAYS', 30) * DAY_SECONDS;
  */
 async function takeGuestAllowance(req, kind) {
   if (req.userId) return true;
-  const key = `guest:${kind}:${req.ip}`;
-  try {
-    const now = Date.now();
-    const raw = await redisClient.get(key);
-    let record = raw ? JSON.parse(raw) : null;
-    if (!record || record.resetAt <= now) {
-      record = { count: 0, resetAt: now + windowSeconds() * 1000 };
-    }
-    if (record.count >= limitFor(kind)) return false;
-    record.count += 1;
-    await redisClient.set(key, JSON.stringify(record), { EX: Math.max(1, Math.ceil((record.resetAt - now) / 1000)) });
-    return true;
-  } catch (err) {
-    logger.error(`Guest allowance check failed for ${kind}:`, err.message);
-    return true;
-  }
+  // The window starts when the first unit is used and is not extended by later ones.
+  return (await takeUpTo(counterKey(req, kind), 1, limitFor(kind), windowSeconds())) === 1;
 }
 
 /** Gives back one unit after the work it paid for failed (for example the AI was down), so the guest does not lose it. */
 async function refundGuestAllowance(req, kind) {
   if (req.userId) return;
-  const key = `guest:${kind}:${req.ip}`;
-  try {
-    const raw = await redisClient.get(key);
-    const record = raw ? JSON.parse(raw) : null;
-    if (!record || record.count <= 0 || record.resetAt <= Date.now()) return;
-    record.count -= 1;
-    await redisClient.set(key, JSON.stringify(record), { EX: Math.max(1, Math.ceil((record.resetAt - Date.now()) / 1000)) });
-  } catch (err) {
-    logger.error(`Guest allowance refund failed for ${kind}:`, err.message);
-  }
+  await giveBack(counterKey(req, kind), 1, windowSeconds());
 }
 
 const GUEST_LIMIT_BODY = {
