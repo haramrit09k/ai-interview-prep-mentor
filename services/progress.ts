@@ -1,4 +1,4 @@
-import type { Insights } from '../types';
+import type { Insights, SkillReview } from '../types';
 import { readErrorMessage } from './gemini';
 
 const authHeaders = (): Record<string, string> => {
@@ -20,4 +20,12 @@ export const fetchInsights = async (): Promise<Insights> => {
 export const deleteInsights = async (): Promise<void> => {
   const response = await fetch('/api/insights', { method: 'DELETE', headers: authHeaders() });
   if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not delete your progress data'));
+};
+
+export const fetchReview = async (skillId: string): Promise<SkillReview> => {
+  const response = await fetch(`/api/review/${encodeURIComponent(skillId)}`, { headers: authHeaders() });
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, 'Could not load your review'));
+  }
+  return (await response.json()) as SkillReview;
 };

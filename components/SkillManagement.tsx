@@ -8,7 +8,7 @@ interface SkillManagementProps {
   onDeleteSkill: (id: string) => void;
   onOpenPracticeOptions: (skill: Skill) => void;
   onOpenAddQuestionModal: () => void;
-  onOpenRevisionSummary: (skill: Skill) => void;
+  onOpenReview: (skill: Skill) => void;
   isSkillLimitReached: boolean;
 }
 
@@ -18,7 +18,7 @@ const SkillManagement: React.FC<SkillManagementProps> = ({
   onDeleteSkill,
   onOpenPracticeOptions,
   onOpenAddQuestionModal,
-  onOpenRevisionSummary,
+  onOpenReview,
   isSkillLimitReached,
 }) => {
   const [newSkill, setNewSkill] = useState('');
@@ -79,7 +79,7 @@ const SkillManagement: React.FC<SkillManagementProps> = ({
                   <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 w-full sm:w-auto">
                     <div className="flex gap-2 w-full">
                       <button
-                        onClick={() => onOpenRevisionSummary(skill)}
+                        onClick={() => onOpenReview(skill)}
                         className="flex items-center justify-center gap-2 py-2 px-3 rounded-md bg-background-medium text-text-primary text-xs sm:text-sm font-semibold hover:bg-gray-700 transition-colors w-1/2 sm:w-auto"
                       >
                         <ClipboardListIcon className="w-4 h-4" /> <span className="whitespace-nowrap">Review</span>

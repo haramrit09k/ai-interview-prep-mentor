@@ -6,12 +6,12 @@ const clip = (value, max) => String(value ?? '').slice(0, max);
 const cleanConcepts = (list) =>
   JSON.stringify((Array.isArray(list) ? list : []).filter((c) => typeof c === 'string').slice(0, 10).map((c) => clip(c, 100)));
 
-async function insertAnswer({ userId, skillId, skillName, questionText, outcome, conceptsKnown, conceptsToReview, delivery }) {
+async function insertAnswer({ userId, skillId, skillName, questionText, outcome, conceptsKnown, conceptsToReview, delivery, level }) {
   await db.query(
     `INSERT INTO answer_log
       (id, user_id, skill_id, skill_name, question_text, outcome, concepts_known, concepts_to_review,
-       duration_sec, word_count, wpm, filler_count, answered_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+       duration_sec, word_count, wpm, filler_count, answered_at, level)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       crypto.randomUUID(),
       userId,
@@ -26,6 +26,7 @@ async function insertAnswer({ userId, skillId, skillName, questionText, outcome,
       delivery ? delivery.wpm : null,
       delivery ? delivery.fillerTotal : null,
       new Date().toISOString(),
+      level ? clip(level, 20) : null,
     ]
   );
 }
@@ -35,6 +36,17 @@ async function listAnswers(userId) {
   const { rows } = await db.query(
     'SELECT * FROM answer_log WHERE user_id = $1 ORDER BY answered_at DESC LIMIT ' + MAX_ROWS,
     [userId]
+  );
+  return rows.reverse();
+}
+
+const MAX_SKILL_ROWS = 1000;
+
+/** Every recorded answer for one skill, oldest first. Uses the (user, skill, time) index. */
+async function listAnswersForSkill(userId, skillId) {
+  const { rows } = await db.query(
+    'SELECT * FROM answer_log WHERE user_id = $1 AND skill_id = $2 ORDER BY answered_at DESC LIMIT ' + MAX_SKILL_ROWS,
+    [userId, clip(skillId, 100)]
   );
   return rows.reverse();
 }
@@ -57,4 +69,4 @@ async function deleteAnswers(userId) {
   await db.query('DELETE FROM answer_log WHERE user_id = $1', [userId]);
 }
 
-module.exports = { insertAnswer, listAnswers, recentQuestions, deleteAnswers };
+module.exports = { insertAnswer, listAnswers, listAnswersForSkill, recentQuestions, deleteAnswers };
