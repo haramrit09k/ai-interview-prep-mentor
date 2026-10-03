@@ -60,3 +60,15 @@ test('recent questions are forwarded to the questions prompt', async () => {
   assert.match(calls[0].contents, /<recent_questions>\n- Old question one\?\n- Old question two\?\n<\/recent_questions>/);
   assert.deepEqual(result[0], { text: 'A new question?', level: 'Mid-level', skillId: 'java' });
 });
+
+test('level and spoken options reach the prompt that is sent', async () => {
+  nextReply = { mentorAnswer: 'm', feedback: 'f', classification: 'correct', conceptsKnown: [], conceptsToReview: [] };
+  await evaluateAnswer('What is a closure?', 'um a function with scope', { level: 'Expert', spoken: true });
+  assert.match(calls[0].contents, /strong candidate at the "Expert" level/);
+  assert.match(calls[0].contents, /This answer is a speech transcript/);
+
+  calls = [];
+  await evaluateAnswer('What is a closure?', 'a function with scope');
+  assert.match(calls[0].contents, /"Mid-level" level/);
+  assert.doesNotMatch(calls[0].contents, /speech transcript/);
+});

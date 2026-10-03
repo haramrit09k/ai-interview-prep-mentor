@@ -1,11 +1,12 @@
 import logger from '../src/logger';
-import type { DeliveryStats, EvaluationResponse } from '../types';
+import type { DeliveryStats, EvaluationResponse, ExperienceLevel } from '../types';
 
 /** Extra context that lets the server record the answer for progress insights. */
 export interface EvaluationMeta {
   skillId?: string;
   skillName?: string;
   isIdk?: boolean;
+  level?: ExperienceLevel; // grading expectations rise with the level
   delivery?: DeliveryStats | null;
 }
 

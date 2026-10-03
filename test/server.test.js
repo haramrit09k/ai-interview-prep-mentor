@@ -44,11 +44,13 @@ stub('rateLimiter.js', { rateLimiter: (req, res, next) => next() });
 
 let geminiMode = 'ok';
 let evaluateCalls = 0;
+let evaluateArgs = [];
 let questionCalls = [];
 stub('geminiService.js', {
   generateQuestionsForSkill: async (...args) => { questionCalls.push(args); return [{ text: 'fresh question', level: args[1], skillId: args[3] }]; },
-  evaluateAnswer: async () => {
+  evaluateAnswer: async (...args) => {
     evaluateCalls += 1;
+    evaluateArgs.push(args);
     if (geminiMode === 'fail') throw new Error('upstream down');
     return { mentorAnswer: 'm', feedback: 'f', classification: 'correct', conceptsKnown: ['scope'], conceptsToReview: ['hoisting'] };
   },
@@ -195,4 +197,32 @@ test('evaluate: an overlong question and a tag-spoofing answer still work and sh
   assert.equal((await call('POST', '/api/evaluate', { json: body })).status, 200);
   assert.equal((await call('POST', '/api/evaluate', { json: { ...body, questionText: 'q'.repeat(2500) } })).status, 200);
   assert.equal(evaluateCalls, 1, 'both trimmed to the same text, so the second is a cache hit');
+});
+
+test('evaluate: the grade depends on level and on spoken vs typed, so each gets its own cache entry', async () => {
+  evaluateCalls = 0;
+  evaluateArgs = [];
+  const base = { questionText: 'level-cache question', userAnswer: 'the same answer' };
+  const spokenStats = { durationSec: 20, wordCount: 60, wpm: 180, fillerTotal: 1 };
+  assert.equal((await call('POST', '/api/evaluate', { json: { ...base, level: 'Entry-level' } })).status, 200);
+  assert.equal((await call('POST', '/api/evaluate', { json: { ...base, level: 'Expert' } })).status, 200);
+  assert.equal((await call('POST', '/api/evaluate', { json: { ...base, level: 'Expert', delivery: spokenStats } })).status, 200);
+  assert.equal(evaluateCalls, 3, 'different level or spoken flag means a fresh evaluation');
+
+  // repeating any of them is a cache hit
+  await call('POST', '/api/evaluate', { json: { ...base, level: 'Entry-level' } });
+  await call('POST', '/api/evaluate', { json: { ...base, level: 'Expert', delivery: spokenStats } });
+  assert.equal(evaluateCalls, 3);
+
+  assert.deepEqual(evaluateArgs[0][2], { level: 'Entry-level', spoken: false });
+  assert.deepEqual(evaluateArgs[1][2], { level: 'Expert', spoken: false });
+  assert.deepEqual(evaluateArgs[2][2], { level: 'Expert', spoken: true });
+});
+
+test('evaluate: a missing or invalid level is passed on as unspecified', async () => {
+  evaluateArgs = [];
+  await call('POST', '/api/evaluate', { json: { questionText: 'custom question', userAnswer: 'a', level: 'Grandmaster' } });
+  await call('POST', '/api/evaluate', { json: { questionText: 'custom question two', userAnswer: 'a' } });
+  assert.equal(evaluateArgs[0][2].level, undefined);
+  assert.equal(evaluateArgs[1][2].level, undefined);
 });

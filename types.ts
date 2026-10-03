@@ -31,6 +31,7 @@ export interface Question {
   text: string;
   answer?: string; // Only for custom questions
   source: 'custom' | 'gemini';
+  level?: ExperienceLevel; // Set for generated questions, unknown for custom ones
 }
 
 

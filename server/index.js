@@ -227,7 +227,11 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
     // Same trimming the prompt applies, so the cache key matches what the model actually sees.
     const question = cleanBlock(questionText, LIMITS.QUESTION);
     const answerHash = crypto.createHash('sha256').update(cleanBlock(userAnswer, LIMITS.ANSWER)).digest('hex');
-    const cacheKey = `evaluation:${question}:${answerHash}`;
+    // The grade depends on the level and on whether the answer was spoken, so both are part of the key.
+    const gradingLevel = LEVELS.includes(req.body.level) ? req.body.level : undefined;
+    const cleanDelivery = sanitizeDelivery(delivery);
+    const spoken = cleanDelivery !== null;
+    const cacheKey = `evaluation:v2:${gradingLevel || 'unspecified'}:${spoken ? 'spoken' : 'typed'}:${question}:${answerHash}`;
     let evaluation;
     const cachedEvaluation = await redisClient.get(cacheKey);
 
@@ -236,7 +240,7 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
       evaluation = JSON.parse(cachedEvaluation);
     } else {
       logger.info(`Cache miss for evaluation: ${cacheKey}`);
-      evaluation = await evaluateAnswer(questionText, userAnswer);
+      evaluation = await evaluateAnswer(questionText, userAnswer, { level: gradingLevel, spoken });
       await redisClient.set(cacheKey, JSON.stringify(evaluation), { EX: 604800 }); // Cache for 7 days
       logger.info(`Cached evaluation for key: ${cacheKey}`);
     }
@@ -253,7 +257,7 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
           outcome: isIdk === true ? 'idk' : evaluation.classification,
           conceptsKnown: evaluation.conceptsKnown,
           conceptsToReview: evaluation.conceptsToReview,
-          delivery: sanitizeDelivery(delivery),
+          delivery: cleanDelivery,
         });
       } catch (logErr) {
         logger.error(`Could not record answer for user ${req.userId}:`, logErr.message);
