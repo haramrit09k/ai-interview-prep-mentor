@@ -57,9 +57,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
   const handleSubmission = useCallback(async (isIdk: boolean) => {
     if (!currentQuestion) return;
 
-    // Corrected Check: Show modal if the user has no questions left AND hasn't already seen the answer.
+    // Show the modal if a signed-in user has no questions left AND hasn't already seen the answer.
     // This prevents the modal from popping up again on navigation.
-    if (questionsRemaining <= 0 && !viewedAnswer) {
+    // Guests have no weekly allowance (their limit is on sessions, checked when a session starts),
+    // and the App passes them 0 here, so they must be skipped or every guest answer would be blocked.
+    if (isAuthenticated && questionsRemaining <= 0 && !viewedAnswer) {
       setShowLimitModal(true);
       return;
     }
@@ -103,7 +105,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     } finally {
       setIsSubmitting(false);
     }
-  }, [currentQuestion, userAnswer, onQuestionComplete, questionsRemaining, viewedAnswer, delivery, session.skill.id, session.skill.name]);
+  }, [currentQuestion, userAnswer, onQuestionComplete, isAuthenticated, questionsRemaining, viewedAnswer, delivery, session.skill.id, session.skill.name]);
 
   useEffect(() => {
     setUserAnswer('');
