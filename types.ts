@@ -122,3 +122,11 @@ export interface RatingResult {
   before: number;
   after: number;
 }
+
+/** One skill the user has practised, as recorded on the server: used to rebuild the skills list on a new browser. */
+export interface SkillHistoryEntry {
+  id: string;
+  name: string;
+  lastPracticed: string;
+  answers: [AnswerOutcome, ExperienceLevel | null][]; // oldest first
+}

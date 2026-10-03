@@ -1,4 +1,4 @@
-import type { Insights, SkillReview } from '../types';
+import type { Insights, SkillHistoryEntry, SkillReview } from '../types';
 import { readErrorMessage } from './gemini';
 
 const authHeaders = (): Record<string, string> => {
@@ -28,4 +28,18 @@ export const fetchReview = async (skillId: string): Promise<SkillReview> => {
     throw new Error(await readErrorMessage(response, 'Could not load your review'));
   }
   return (await response.json()) as SkillReview;
+};
+
+/** Every skill the user has practised, with the outcome and level of each answer. Used to rebuild the skills list. */
+export const fetchSkillHistory = async (): Promise<SkillHistoryEntry[]> => {
+  const response = await fetch('/api/skills/history', { headers: authHeaders() });
+  if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not load your skills'));
+  const data = (await response.json()) as { skills?: SkillHistoryEntry[] };
+  return Array.isArray(data.skills) ? data.skills : [];
+};
+
+/** Removes a skill's recorded history on the server, so the skill is not brought back later. */
+export const deleteSkillHistory = async (skillId: string): Promise<void> => {
+  const response = await fetch(`/api/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE', headers: authHeaders() });
+  if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not delete the skill history'));
 };
