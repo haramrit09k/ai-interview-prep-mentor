@@ -22,7 +22,7 @@ export const LimitReachedModal: React.FC<LimitReachedModalProps> = ({ onClose, o
       upgrade: false,
     },
     quota: {
-      title: "Great work! You've hit your daily practice limit.",
+      title: "Great work! You've hit your weekly practice limit.",
       body: 'To continue with your interview and unlock unlimited practice sessions, please upgrade.',
       upgrade: true,
     }

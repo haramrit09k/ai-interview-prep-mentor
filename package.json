@@ -10,7 +10,7 @@
     "heroku-postbuild": "npm run build"
   },
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "dependencies": {
     "@google/genai": "^1.8.0",

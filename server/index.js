@@ -205,7 +205,7 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
 app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, async (req, res) => {
   const { questionText, userAnswer } = req.body;
 
-  if (!questionText || userAnswer === undefined) {
+  if (typeof questionText !== 'string' || !questionText.trim() || typeof userAnswer !== 'string') {
     return res.status(400).json({ error: 'Missing questionText or userAnswer' });
   }
 
@@ -229,8 +229,9 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
 
     res.json(evaluation);
   } catch (error) {
+    // Nothing was cached above, so a transient Gemini failure is not remembered.
     logger.error('Error in /api/evaluate:', error);
-    res.status(500).json({ error: 'Error evaluating answer' });
+    res.status(502).json({ error: 'The AI mentor is unavailable right now. Please try again in a moment.' });
   }
 });
 
@@ -480,17 +481,6 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(path.join(__dirname, '../dist/index.html'));
   });
 }
-
-// Endpoint for frontend logging
-app.post('/api/log', express.json(), (req, res) => {
-  const { level, message, context } = req.body;
-  if (logger[level]) {
-    logger[level](`[FRONTEND] ${message}`, context);
-  } else {
-    logger.info(`[FRONTEND] ${message}`, context); // Default to info if level is unknown
-  }
-  res.status(200).json({ error: 'Log received' });
-});
 
 // Last-resort error handler: always answer with JSON, never an HTML/plain-text stack page
 app.use((err, req, res, next) => {

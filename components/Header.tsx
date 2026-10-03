@@ -1,8 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { UserProfile } from '../types';
 import { LogoutIcon, QuestionMarkCircleIcon, Bars3Icon } from './Icons';
-import PurchaseQuestionsModal from './PurchaseQuestionsModal';
-import { purchaseOptions } from '../config/purchaseOptions';
 import { BrainIcon } from './BrainIcon';
 import { GoogleLogin } from '@react-oauth/google';
 
@@ -20,9 +18,8 @@ interface HeaderProps {
     nextResetDate: string | null; // New prop for next reset date
 }
 
-const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onPurchaseQuestions, onOpenWelcomeModal, setShowPurchaseModal, nextResetDate }) => {
+const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, isAuthEnabled, questionsRemaining, isAuthenticated, onOpenWelcomeModal, setShowPurchaseModal, nextResetDate }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    const [showPurchaseOptions, setShowPurchaseOptions] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -44,19 +41,6 @@ const Header: React.FC<HeaderProps> = ({ userProfile, onLoginSuccess, onLogout, 
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [isMobileMenuOpen]);
-
-    const showQuotaWarning = isAuthenticated && questionsRemaining <= 10;
-
-    const handleTogglePurchaseOptions = () => {
-        setShowPurchaseOptions(!showPurchaseOptions);
-    };
-
-    const handlePurchase = (quantity: number) => {
-        onPurchaseQuestions(quantity, purchaseOptions[quantity].priceCents);
-        setShowPurchaseOptions(false);
-    };
-
-    const [selectedQuantity, setSelectedQuantity] = useState(purchaseOptions[0].quantity);
 
     return (
         <header className="bg-background-medium/80 backdrop-blur-sm sticky top-0 z-40 border-b border-background-light">

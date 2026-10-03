@@ -1,50 +1,31 @@
 import logger from '../src/logger';
+import type { EvaluationResponse } from '../types';
 
 // All Gemini calls happen on the server (see server/geminiService.js).
 // The API key must never be bundled into client code.
 
-export type EvaluationResponse = {
-  mentorAnswer: string;
-  feedback: string;
-  classification: 'correct' | 'partially_correct' | 'incorrect';
-  conceptsKnown: string[];
-  conceptsToReview: string[];
-};
-
-const errorResult = (): EvaluationResponse => ({
-  mentorAnswer: "Sorry, I encountered an error while generating an answer. Please try again.",
-  feedback: "Could not evaluate your answer due to an error.",
-  classification: 'incorrect',
-  conceptsKnown: [],
-  conceptsToReview: [],
-});
-
+/** Resolves with the evaluation, or throws if the backend could not produce one. */
 export const evaluateAnswer = async (questionText: string, userAnswer: string): Promise<EvaluationResponse> => {
   logger.debug('Sending evaluation request to backend for question:', questionText);
-  try {
-    // The backend accepts guests too, so the token is optional.
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const token = localStorage.getItem('google_id_token');
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
 
-    const response = await fetch('/api/evaluate', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ questionText, userAnswer }),
-    });
-
-    if (!response.ok) {
-      const message = await readErrorMessage(response, 'Failed to evaluate answer');
-      throw new Error(message);
-    }
-
-    return (await response.json()) as EvaluationResponse;
-  } catch (error) {
-    logger.error("Error evaluating answer:", error);
-    return errorResult();
+  // The backend accepts guests too, so the token is optional.
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = localStorage.getItem('google_id_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
+
+  const response = await fetch('/api/evaluate', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ questionText, userAnswer }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, 'Failed to evaluate answer'));
+  }
+
+  return (await response.json()) as EvaluationResponse;
 };
 
 /**
