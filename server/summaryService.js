@@ -1,5 +1,6 @@
 const { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } = require("@google/genai");
 const logger = require('./logger');
+const { buildSummaryPrompt } = require('./prompts');
 
 const API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
 
@@ -43,23 +44,8 @@ const generateRevisionSummary = async (skillName, knownQuestions, unknownQuestio
   }
 
   try {
-    let prompt = `You are an expert learning assistant. A user has practiced the skill "${skillName}" and you need to create a revision summary based on their performance.\n\nI will provide you with lists of questions based on their answers.\n\nYour task is to:\n- Analyze the questions, considering the skill "${skillName}".\n- Identify the core concepts or topics being tested. Return the concepts as an array of strings.\n- Each item in the array should be a key concept or topic, not a detailed explanation.\n- The summary should synthesize the underlying topics, not just list questions.\n- Aim for 1-3 concepts per section, if possible.\n\n`;
+    const prompt = buildSummaryPrompt(skillName, knownQuestions, unknownQuestions);
 
-    if (knownQuestions.length > 0) {
-      prompt += `Questions the user KNEW:\n---\n- ${knownQuestions.join('\n- ')}\n---\n\n`;
-    } else {
-      prompt += `The user did not have any questions they knew.\n\n`;
-    }
-
-    if (unknownQuestions.length > 0) {
-      prompt += `Questions the user DID NOT KNOW:\n---\n- ${unknownQuestions.join('\n- ')}\n---\n\n`;
-    } else {
-      prompt += `The user did not have any questions they did not know.\n\n`;
-    }
-
-    prompt += `Return a JSON object with two keys:\n- "conceptsKnown": An array of strings, representing concepts the user is comfortable with. If there were no known questions, return an empty array.\n- "conceptsToReview": An array of strings, representing concepts the user should focus on for revision. If there were no unknown questions, return an empty array.`;
-
-    
     const response = await ai.models.generateContent({
       model,
       contents: prompt,

@@ -1,6 +1,7 @@
 import React from 'react';
 import { marked, type Tokens } from 'marked';
 import DOMPurify from 'dompurify';
+import { normalizeMath } from '../utils/formatMath';
 
 interface MarkdownRendererProps {
   content: string | null;
@@ -26,7 +27,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
     
     marked.setOptions({ renderer });
     
-    const dirtyHtml = marked.parse(content) as string;
+    // Older cached evaluations may contain LaTeX like $O(n)$, so normalise it before rendering.
+    const dirtyHtml = marked.parse(normalizeMath(content)) as string;
     // Allow target="_blank" for links
     const cleanHtml = DOMPurify.sanitize(dirtyHtml, { ADD_ATTR: ['target'] });
     
