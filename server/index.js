@@ -13,6 +13,9 @@ const { LIMITS, LEVELS, cleanBlock } = require('./prompts');
 const Stripe = require('stripe');
 const redisClient = require('./redisClient');
 const { rateLimiter } = require('./rateLimiter');
+const { loadQuota, remainingQuestions, chargeForGrading, quotaSnapshot, getStartOfWeek, QUOTA_EXCEEDED_BODY } = require('./quota');
+const { InviteError, createInvite, listInvites, revokeInvite, redeemInvite } = require('./invites');
+const { takeGuestAllowance, refundGuestAllowance, GUEST_LIMIT_BODY, GUEST_MAX_QUESTIONS } = require('./guestLimit');
 const crypto = require('crypto');
 
 // Authoritative price list. Keep in sync with config/purchaseOptions.ts.
@@ -56,73 +59,93 @@ const getDurationInMilliseconds = (start) => {
 };
 
 // Helper function to get the start of the current week (Monday)
-const getStartOfWeek = (date) => {
-  const d = new Date(date);
-  const day = d.getDay(); // Sunday - 0, Monday - 1, ..., Saturday - 6
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Monday start
-  d.setDate(diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
 
 // --- API Routes ---
 app.get('/api/quota', authMiddleware, async (req, res) => {
   logger.debug(`GET /api/quota: User ID: ${req.userId}`);
   try {
-    const { rows } = await pool.query('SELECT questions_used, last_reset_date, has_seen_welcome_modal FROM users WHERE id = $1', [req.userId]);
-    const now = new Date();
-    const startOfCurrentWeek = getStartOfWeek(now);
-
-    if (rows.length > 0) {
-      const user = rows[0];
-      const lastResetDate = user.last_reset_date ? new Date(user.last_reset_date) : new Date(0);
-      const startOfLastResetWeek = getStartOfWeek(lastResetDate);
-
-      // Check if the last reset was in a previous week
-      if (startOfCurrentWeek.getTime() > startOfLastResetWeek.getTime()) {
-        logger.info(`New week detected. Resetting weekly quota for user ${req.userId}.`);
-        const newResetTimestamp = startOfCurrentWeek.toISOString();
-        await pool.query('UPDATE users SET questions_used = 0, last_reset_date = $1 WHERE id = $2', [newResetTimestamp, req.userId]);
-        res.json({
-          questionsUsed: 0,
-          lastResetDate: newResetTimestamp,
-          hasSeenWelcomeModal: user.has_seen_welcome_modal
-        });
-      } else {
-        // Quota is still within the current week
-        logger.info(`GET /api/quota: Found user ${req.userId}. Quota is still valid for the current week.`);
-        res.json({
-          questionsUsed: user.questions_used,
-          lastResetDate: user.last_reset_date,
-          hasSeenWelcomeModal: user.has_seen_welcome_modal
-        });
-      }
-    } else {
-      // User not found, create them with the start of the current week as reset date
-      const newResetTimestamp = startOfCurrentWeek.toISOString();
-      logger.info(`GET /api/quota: User ${req.userId} not found, creating new entry with weekly reset.`);
-      await pool.query('INSERT INTO users (id, questions_used, last_reset_date, has_seen_welcome_modal) VALUES ($1, 0, $2, FALSE)', [req.userId, newResetTimestamp]);
-      res.json({
-        questionsUsed: 0,
-        lastResetDate: newResetTimestamp,
-        hasSeenWelcomeModal: false
-      });
-    }
+    res.json(await loadQuota(req.userId));
   } catch (err) {
     logger.error(`GET /api/quota: Error for user ${req.userId}:`, err.message);
     res.status(500).json({ error: 'Server Error' });
   }
 });
 
-app.post('/api/quota/increment', express.json(), authMiddleware, async (req, res) => {
-  logger.debug(`POST /api/quota/increment: User ID: ${req.userId}`);
+// --- Invite codes ---
+// The admin makes codes with ADMIN_API_KEY (see scripts/invite.js). Without a strong key the admin routes
+// do not exist at all, so a fresh deployment has no admin surface. Generate one with: openssl rand -hex 32
+const ADMIN_MAX_FAILURES = 10; // wrong keys allowed per IP address per hour
+const ADMIN_LOCKOUT_SECONDS = 60 * 60;
+
+/** A key that is long and not a repeated pattern, so a weak one cannot be used by mistake. */
+const isStrongAdminKey = (key) => typeof key === 'string' && key.length >= 32 && new Set(key).size >= 12;
+
+const adminAuth = async (req, res, next) => {
+  const key = process.env.ADMIN_API_KEY;
+  if (!isStrongAdminKey(key)) return res.status(404).json({ error: 'Not found' });
+
+  // After too many wrong keys from one address, stop checking for a while, even for the right key.
+  const failKey = `adminfail:${req.ip}`;
+  let failures = 0;
   try {
-    await pool.query('UPDATE users SET questions_used = questions_used + 1 WHERE id = $1', [req.userId]);
-    logger.info(`POST /api/quota/increment: Quota incremented for user ${req.userId}.`);
-    res.status(200).json({ ok: true });
+    failures = parseInt(await redisClient.get(failKey), 10) || 0;
   } catch (err) {
-    logger.error(`POST /api/quota/increment: Error for user ${req.userId}:`, err.message);
-    res.status(500).json({ error: 'Server Error' });
+    logger.error('Admin: could not read the failed attempt count:', err.message);
+  }
+  if (failures >= ADMIN_MAX_FAILURES) {
+    return res.status(429).json({ error: 'Too many wrong keys. Try again later.' });
+  }
+
+  const given = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const digest = (value) => crypto.createHash('sha256').update(value).digest();
+  if (!crypto.timingSafeEqual(digest(given), digest(key))) {
+    logger.warn(`Admin: wrong key from ${req.ip}.`);
+    try {
+      await redisClient.set(failKey, String(failures + 1), { EX: ADMIN_LOCKOUT_SECONDS });
+    } catch (err) {
+      logger.error('Admin: could not save the failed attempt count:', err.message);
+    }
+    return res.status(401).json({ error: 'Invalid admin key' });
+  }
+  next();
+};
+
+const inviteErrorResponse = (res, err, where) => {
+  if (err instanceof InviteError) return res.status(err.status).json({ error: err.message });
+  logger.error(`${where}:`, err.message);
+  return res.status(500).json({ error: 'Server Error' });
+};
+
+app.post('/api/admin/invites', express.json(), adminAuth, async (req, res) => {
+  try {
+    const { email, questions, days } = req.body || {};
+    res.status(201).json(await createInvite({ email, questions, days }));
+  } catch (err) {
+    inviteErrorResponse(res, err, 'POST /api/admin/invites');
+  }
+});
+
+app.get('/api/admin/invites', adminAuth, async (req, res) => {
+  try {
+    res.json(await listInvites());
+  } catch (err) {
+    inviteErrorResponse(res, err, 'GET /api/admin/invites');
+  }
+});
+
+app.delete('/api/admin/invites/:code', adminAuth, async (req, res) => {
+  try {
+    res.json(await revokeInvite(req.params.code));
+  } catch (err) {
+    inviteErrorResponse(res, err, 'DELETE /api/admin/invites');
+  }
+});
+
+app.post('/api/invites/redeem', express.json(), authMiddleware, rateLimiter, async (req, res) => {
+  try {
+    res.json(await redeemInvite({ userId: req.userId, userEmail: req.userEmail, code: req.body?.code }));
+  } catch (err) {
+    inviteErrorResponse(res, err, 'POST /api/invites/redeem');
   }
 });
 
@@ -152,6 +175,8 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
   if (req.userId) {
     // Authenticated user logic
     try {
+      // Nothing is generated for someone with no questions left, so the app cannot be used to run up cost.
+      if (remainingQuestions(await loadQuota(req.userId)) <= 0) return res.status(403).json(QUOTA_EXCEEDED_BODY);
       const { rows } = await pool.query('SELECT unanswered_questions FROM users WHERE id = $1', [req.userId]);
       let storedQuestionMap = {};
       if (rows.length > 0 && rows[0].unanswered_questions) {
@@ -201,12 +226,18 @@ app.get('/api/questions', authOptionalMiddleware, rateLimiter, async (req, res) 
       res.status(500).json({ error: 'Server Error' });
     }
   } else {
-    // Guest user logic
+    // Guest user logic. Guests get a short round, and only a few rounds per IP address.
     try {
-      logger.info(`GET /api/questions: Generating ${requestedCount} new questions for guest user.`);
-      const newQuestions = await generateQuestionsForSkill(skillName, level, requestedCount, skillId);
+      if (!(await takeGuestAllowance(req, 'sessions'))) {
+        logger.info(`GET /api/questions: Guest allowance used up for ${req.ip}.`);
+        return res.status(403).json(GUEST_LIMIT_BODY);
+      }
+      const guestCount = Math.min(requestedCount, GUEST_MAX_QUESTIONS);
+      logger.info(`GET /api/questions: Generating ${guestCount} new questions for guest user.`);
+      const newQuestions = await generateQuestionsForSkill(skillName, level, guestCount, skillId);
       res.json({ questions: newQuestions });
     } catch (err) {
+      await refundGuestAllowance(req, 'sessions');
       logger.error(`GET /api/questions: Error for guest user:`, err.message);
       res.status(500).json({ error: 'Server Error' });
     }
@@ -219,6 +250,25 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
 
   if (typeof questionText !== 'string' || !questionText.trim() || typeof userAnswer !== 'string') {
     return res.status(400).json({ error: 'Missing questionText or userAnswer' });
+  }
+
+  // Guests only get a limited number of graded answers per IP address, checked after the input is known to be valid.
+  if (!(await takeGuestAllowance(req, 'evaluations'))) {
+    logger.info(`POST /api/evaluate: Guest allowance used up for ${req.ip}.`);
+    return res.status(403).json(GUEST_LIMIT_BODY);
+  }
+
+  // Signed in users pay one question the first time a question is graded. This is the real limit: the app
+  // only shows the numbers. The charge is given back below if grading fails.
+  let charge = null;
+  if (req.userId) {
+    try {
+      charge = await chargeForGrading(req.userId, cleanBlock(questionText, LIMITS.QUESTION));
+    } catch (err) {
+      logger.error(`POST /api/evaluate: could not check the quota for user ${req.userId}:`, err.message);
+      return res.status(500).json({ error: 'Server Error' });
+    }
+    if (!charge.ok) return res.status(charge.status).json(charge.body);
   }
 
   try {
@@ -265,9 +315,19 @@ app.post('/api/evaluate', express.json(), authOptionalMiddleware, rateLimiter, a
       }
     }
 
+    // Signed in users also get their new quota, so the app shows what the server decided.
+    if (req.userId) {
+      try {
+        return res.json({ ...evaluation, quota: await quotaSnapshot(req.userId) });
+      } catch (quotaErr) {
+        logger.error(`POST /api/evaluate: could not read the quota for user ${req.userId}:`, quotaErr.message);
+      }
+    }
     res.json(evaluation);
   } catch (error) {
     // Nothing was cached above, so a transient Gemini failure is not remembered.
+    await refundGuestAllowance(req, 'evaluations');
+    if (charge && charge.release) await charge.release();
     logger.error('Error in /api/evaluate:', error);
     res.status(502).json({ error: 'The AI mentor is unavailable right now. Please try again in a moment.' });
   }

@@ -20,8 +20,9 @@ I built it to learn how the pieces of a small paid web product fit together: log
 - Keeps a skill rating that moves with your answers (+10 correct, +5 partial, -5 wrong or "I don't know")
 - Saves questions you didn't get to, and serves them first next time
 - A Review button on every skill opens a study sheet built from your whole history: the questions worth another try (with a one-click "practise these" session), concepts you keep missing, concepts you have mastered, and how that skill is trending
-- Works as a guest (2 skills, 2 sessions); signing in with Google unlocks 5 skills and 50 questions a week
+- Works as a guest (2 skills, 2 sessions of 5 questions each); signing in with Google unlocks 5 skills and 50 questions a week
 - Sells extra question packs through Stripe Checkout
+- Invite codes: the admin makes a code for a friend's email, and the friend enters it (or opens the share link) after signing in with that email to get bonus questions. See Invite codes below
 
 ## How it works
 
@@ -74,6 +75,10 @@ sequenceDiagram
     alt over the limit
         A-->>B: 429
     end
+    A->>A: Signed-in users pay one question (weekly first, then bonus). Guests use their free allowance
+    alt no questions left
+        A-->>B: 403 with a code the app understands
+    end
     A->>R: Look up cache key (question + SHA-256 of answer)
     alt cache hit
         R-->>A: Stored evaluation
@@ -83,11 +88,10 @@ sequenceDiagram
         A->>A: Validate the shape
         A->>R: Cache for 7 days
     end
-    A-->>B: Evaluation
-    B->>A: POST /api/quota/increment (signed-in users)
+    A-->>B: Evaluation (and, for signed-in users, the new quota)
 ```
 
-If Gemini fails, the API returns a 502 and nothing is cached. The client shows a retry message and does not use up quota or change your rating.
+If Gemini fails, the API returns a 502, nothing is cached, and the question that was charged is given back. The client shows a retry message and does not change your rating.
 
 ### What happens when you answer out loud
 
@@ -115,9 +119,10 @@ Audio is never stored. It is held in memory long enough to send to Gemini and th
 ### Design decisions worth explaining
 
 - **Identity is the Google `sub` claim.** The browser sends the Google ID token, and the server verifies the signature and audience on every request using `google-auth-library`. There are no passwords and no session table.
-- **Guests are allowed on the AI endpoints.** An optional-auth middleware attaches a user id when a valid token is present and otherwise lets the request through as a guest, rate limited by IP. The guest limits on skills and sessions are enforced in the browser, so they are a product nudge and not a security boundary.
+- **Guests are allowed on the AI endpoints.** An optional-auth middleware attaches a user id when a valid token is present and otherwise lets the request through as a guest, rate limited by IP. The skill limit for guests is enforced in the browser only, so it is a product nudge. The free practice itself is enforced on the server (`server/guestLimit.js`): per IP address, kept in Redis, a guest gets 2 question rounds of 5 questions and about 20 graded answers per 30 days, so clearing site data does not bring them back. People on the same network share one allowance, and the numbers can be changed with `GUEST_SESSIONS_LIMIT`, `GUEST_EVALUATIONS_LIMIT` and `GUEST_WINDOW_DAYS`.
 - **The server decides prices.** The client sends a quantity (10, 50, or 100). The server looks the price up in its own table, so a tampered request can't change what you pay.
 - **Payments are confirmed by webhook, not by the redirect.** Stripe calls `/webhook` with a signed event, the server verifies the signature against the raw request body, and only then credits the user's quota.
+- **The weekly questions are enforced on the server.** The app only shows the numbers (`server/quota.js`). A signed-in user pays one question the first time a question is graded, and the server refuses to grade or to generate questions when none are left, so editing the browser code does not help. Trying the same question again ("Try again") is free but limited to 3 more times a day per question, and a retry flag in the request does not change the price. If grading fails, the question is given back. The limit is 50 a week by default (`WEEKLY_QUESTION_LIMIT`; keep `QUESTIONS_LIMIT_AUTH` in `App.tsx` the same, since the app uses it for display).
 - **Quota resets weekly (Monday).** The reset is checked lazily when the quota is read, so there is no cron job.
 - **One codebase, two databases.** SQLite for local development and Postgres on Heroku, behind a small `query()` wrapper.
 - **Delivery stats are ordinary code, not a model call.** Gemini only transcribes (and is told to keep the "ums"). Pace is words divided by recording time, and filler words are matched against a list. That makes the numbers repeatable, cheap, and unit-testable. The list is deliberately conservative: "like" only counts when it is set off by commas, because it is usually a real word.
@@ -202,3 +207,32 @@ More of the reasoning behind early decisions is in [`LESSONS.md`](LESSONS.md).
 ## License
 
 ISC, see [`LICENSE`](LICENSE).
+
+## Invite codes
+
+You can give a friend some extra practice questions. A code is made for one email address, can be used once, and only works for the Google account with that email.
+
+```
+export ADMIN_API_KEY=...   # the same value as on the server (see below)
+export APP_URL=https://ace-interview.app
+node scripts/invite.js create friend@example.com 10 14   # email, questions (default 10), days valid (default 14)
+node scripts/invite.js list
+node scripts/invite.js revoke ACE-ABCD-EFGH
+```
+
+`create` prints the code, a share link (`/?code=...` opens the redeem dialog with the code filled in) and a short message you can paste. The friend signs in with Google using that email and presses Redeem, or opens the link.
+
+How the cost stays small and bounded:
+- A code has a maximum size (`INVITE_MAX_QUESTIONS_PER_CODE`, default 25) and the total you can hand out is capped (`INVITE_TOTAL_QUESTION_BUDGET`, default 100). Creating a code over the budget is refused. Codes that expire unused, or that you revoke, give their questions back to the budget.
+- Codes expire after 14 days (at most 60). A used code cannot be revoked, because its questions are already given.
+- Bonus questions are kept apart from the weekly 50, so the Monday reset does not wipe them. The weekly questions are used first, then the bonus ones.
+- The admin routes (`/api/admin/invites`) do not exist unless `ADMIN_API_KEY` is a strong key, and then they need it as a Bearer token. After 10 wrong keys from one IP address the server refuses all admin requests from it for an hour.
+
+Make the key with `openssl rand -hex 32` (64 characters). The server ignores keys shorter than 32 characters or made of a repeated pattern. Set it on the server with `heroku config:set ADMIN_API_KEY=<value>`, and never commit it or paste it anywhere public. To avoid keeping the key on your own computer, define a small function in your shell profile that reads it from Heroku each time:
+
+```
+ace-invite() { ADMIN_API_KEY="$(heroku config:get ADMIN_API_KEY -a YOUR_HEROKU_APP)" APP_URL=https://ace-interview.app node /path/to/ai-interview-prep-mentor/scripts/invite.js "$@"; }
+```
+
+Then `ace-invite create friend@example.com 10 14` works from any folder. If the key ever leaks, set a new one on Heroku and the old one stops working at once.
+- A wrong code, someone else's code and a made up code all give the same message, so codes cannot be probed. Gmail dots and +tags are ignored when matching emails.

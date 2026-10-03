@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import type { Skill, ExperienceLevel } from '../types';
 import { XIcon, SpinnerIcon } from './Icons';
 import { RATING_CEILING, isAtCeiling } from '../utils/rating';
-import { DEFAULT_QUESTION_COUNT, LEVEL_STYLE, recommendedLevel } from '../utils/practiceDefaults';
+import { DEFAULT_QUESTION_COUNT, GUEST_MAX_QUESTIONS, LEVEL_STYLE, recommendedLevel } from '../utils/practiceDefaults';
 
 interface StartPracticeModalProps {
   skill: Skill;
@@ -105,7 +105,8 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
               </div>
               <div className="grid grid-cols-3 gap-2">
                  {counts.map(c => {
-                  const isDisabled = false; // Allow users to start any session length
+                  // Guests can try a 5 question round. Longer rounds need a sign in.
+                  const isDisabled = !isAuthenticated && c > GUEST_MAX_QUESTIONS;
 
                   return (
                     <button
@@ -120,6 +121,9 @@ const StartPracticeModal: React.FC<StartPracticeModalProps> = ({
                   );
                 })}
               </div>
+              {!isAuthenticated && (
+                <p className="mt-2 text-xs text-text-muted">Sign in to unlock 10 and 15 question rounds.</p>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row justify-end gap-3 pt-2">

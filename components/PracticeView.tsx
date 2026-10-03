@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Question, AnswerOutcome, DeliveryStats, ExperienceLevel, RatingResult } from '../types';
-import { evaluateAnswer, readErrorMessage } from '../services/gemini';
+import type { Question, AnswerOutcome, DeliveryStats, EvaluationResponse, ExperienceLevel, RatingResult } from '../types';
+import { evaluateAnswer, readErrorMessage, GuestLimitError, QuotaExceededError } from '../services/gemini';
 import { ChevronLeftIcon, ChevronRightIcon, BrainCircuitIcon, SpinnerIcon } from './Icons';
 import MarkdownRenderer from './MarkdownRenderer';
 import { LimitReachedModal } from './LimitReachedModal';
@@ -27,13 +27,14 @@ interface PracticeViewProps {
   session: PracticeSession;
   onEndSession: () => void;
   onNavigate: (direction: 'next' | 'prev') => void;
-  onQuestionComplete: (args: { question: Question; classification: AnswerOutcome; isRetry?: boolean }) => RatingResult;
+  onQuestionComplete: (args: { question: Question; classification: AnswerOutcome; isRetry?: boolean; quota?: EvaluationResponse['quota'] }) => RatingResult;
   onPracticeAgain: (level: ExperienceLevel) => void;
   questionsRemaining: number; // Receive quota from App.tsx
   isAuthenticated: boolean; // Voice answers and progress tracking need a signed-in user
+  signInButton?: React.ReactNode; // Offered to guests whose free practice is used up
 }
 
-const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNavigate, onQuestionComplete, onPracticeAgain, questionsRemaining, isAuthenticated }) => {
+const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNavigate, onQuestionComplete, onPracticeAgain, questionsRemaining, isAuthenticated, signInButton = null }) => {
   const currentQuestion: Question = session.questions[session.currentQuestionIndex];
 
   const [userAnswer, setUserAnswer] = useState('');
@@ -57,9 +58,11 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
   const handleSubmission = useCallback(async (isIdk: boolean) => {
     if (!currentQuestion) return;
 
-    // Corrected Check: Show modal if the user has no questions left AND hasn't already seen the answer.
+    // Show the modal if a signed-in user has no questions left AND hasn't already seen the answer.
     // This prevents the modal from popping up again on navigation.
-    if (questionsRemaining <= 0 && !viewedAnswer) {
+    // Guests have no weekly allowance (their limit is on sessions, checked when a session starts),
+    // and the App passes them 0 here, so they must be skipped or every guest answer would be blocked.
+    if (isAuthenticated && questionsRemaining <= 0 && !viewedAnswer) {
       setShowLimitModal(true);
       return;
     }
@@ -71,7 +74,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
 
     try {
       // An empty answer for "I Don't Know" still gets us the mentor answer and concepts to review.
-      const { mentorAnswer, feedback, classification } =
+      const { mentorAnswer, feedback, classification, quota } =
         await evaluateAnswer(currentQuestion.text, isIdk ? "" : userAnswer, {
           skillId: session.skill.id,
           skillName: session.skill.name,
@@ -90,7 +93,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
       }
       // Only count the question (quota, rating, history) once we actually got an evaluation.
       const finalOutcome: AnswerOutcome = isIdk ? 'idk' : classification;
-      const rating = onQuestionComplete({ question: currentQuestion, classification: finalOutcome, isRetry });
+      const rating = onQuestionComplete({ question: currentQuestion, classification: finalOutcome, isRetry, quota });
       setOutcome(finalOutcome);
       setWasRetry(isRetry);
       setIsEditing(false);
@@ -99,11 +102,15 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
         setResults(prev => ({ ...prev, [currentQuestion.id]: { outcome: finalOutcome, ...rating } }));
       }
     } catch (error) {
-      setEvaluationError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
+      if (error instanceof GuestLimitError || error instanceof QuotaExceededError) {
+        setShowLimitModal(true);
+      } else {
+        setEvaluationError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
+      }
     } finally {
       setIsSubmitting(false);
     }
-  }, [currentQuestion, userAnswer, onQuestionComplete, questionsRemaining, viewedAnswer, delivery, session.skill.id, session.skill.name]);
+  }, [currentQuestion, userAnswer, onQuestionComplete, isAuthenticated, questionsRemaining, viewedAnswer, delivery, session.skill.id, session.skill.name]);
 
   useEffect(() => {
     setUserAnswer('');
@@ -321,10 +328,10 @@ const PracticeView: React.FC<PracticeViewProps> = ({ session, onEndSession, onNa
     <>
       {showLimitModal && (
         <LimitReachedModal 
-          reason="quota" 
+          reason={isAuthenticated ? 'quota' : 'sessions'}
           onClose={onEndSession} 
           onUpgrade={handleUpgrade}
-          googleLoginComponent={null}
+          googleLoginComponent={signInButton}
         />
       )}
       <div className="min-h-screen flex flex-col p-4 sm:p-8">

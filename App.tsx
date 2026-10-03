@@ -18,11 +18,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import logger from './src/logger'; // Import the logger
-import { readErrorMessage } from './services/gemini';
+import { readErrorMessage, isGuestLimitBody, isQuotaExceededBody } from './services/gemini';
 import ProgressModal from './components/ProgressModal';
+import RedeemCodeModal from './components/RedeemCodeModal';
+import { codeFromAddress, clearCodeFromAddress } from './services/invites';
 import Footer from './components/Footer';
 import { fetchInsights } from './services/progress';
-import { defaultQuestionCount, recommendedLevel } from './utils/practiceDefaults';
+import { GUEST_MAX_QUESTIONS, defaultQuestionCount, recommendedLevel } from './utils/practiceDefaults';
 
 
 // Helper to shuffle array
@@ -55,6 +57,7 @@ interface PracticeSession {
 interface AuthQuota {
     questionsUsed: number;
     lastResetDate: string; // YYYY-MM-DD format
+    bonusQuestions?: number; // from invite codes, spent after the weekly questions
 }
 
 const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => {
@@ -76,6 +79,12 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [isProgressOpen, setIsProgressOpen] = useState(false);
+  // A share link like /?code=ACE-XXXX-XXXX opens the redeem dialog with the code filled in.
+  const [redeem, setRedeem] = useState<{ isOpen: boolean; code: string }>(() => {
+    const code = codeFromAddress();
+    return { isOpen: code !== null, code: code ?? '' };
+  });
+  useEffect(() => { clearCodeFromAddress(); }, []);
   
   const [authQuota, setAuthQuota] = useState<AuthQuota>({ questionsUsed: 0, lastResetDate: new Date().toISOString().split('T')[0] });
 
@@ -126,7 +135,8 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
   }, [isAuthenticated, authQuota.lastResetDate]);
   
   // --- DERIVED STATE FOR UI ---
-  const questionsRemaining = isAuthenticated ? QUESTIONS_LIMIT_AUTH - authQuota.questionsUsed : 0;
+  // The weekly questions, plus any bonus questions from invite codes.
+  const questionsRemaining = isAuthenticated ? QUESTIONS_LIMIT_AUTH - authQuota.questionsUsed + (authQuota.bonusQuestions ?? 0) : 0;
   const nextResetDate = isAuthenticated ? new Date(new Date(authQuota.lastResetDate).getTime() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString() : null;
   const sessionsRemaining = isAuthenticated ? Infinity : SESSIONS_LIMIT_ANON - anonSessionsUsed;
   const isSkillLimitReached = isAuthenticated 
@@ -219,6 +229,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       setLimitModal({ isOpen: true, reason: 'sessions' });
       return;
     }
+    if (!isAuthenticated) count = Math.min(count, GUEST_MAX_QUESTIONS);
 
     if (isAuthenticated && !localStorage.getItem('google_id_token')) {
       logger.warn('Authenticated user but no Google ID token found in localStorage. Please log in again.');
@@ -255,6 +266,17 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         }
 
         if (!response.ok) {
+            if (isGuestLimitBody(response.status, data)) {
+                // The server remembers guests by network address, so clearing site data does not bring sessions back.
+                setAnonSessionsUsed(SESSIONS_LIMIT_ANON);
+                setLimitModal({ isOpen: true, reason: 'sessions' });
+                return;
+            }
+            if (isQuotaExceededBody(response.status, data)) {
+                // The server is the one that counts, so trust it over what the screen showed.
+                setLimitModal({ isOpen: true, reason: 'quota' });
+                return;
+            }
             if (response.status === 401) {
                 handleAuthError(handleLogout, 'Failed to fetch questions: Unauthorized.');
             }
@@ -395,34 +417,14 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     });
   };
 
-  // Spends one question of the weekly quota. Fire and forget: the answer is already on screen.
-  const spendQuota = useCallback(async () => {
-    try {
-      const response = await fetch('/api/quota/increment', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('google_id_token')}`
-        },
-      });
-      if (response.ok) {
-        setAuthQuota(prev => ({...prev, questionsUsed: prev.questionsUsed + 1}));
-      } else if (response.status === 401) {
-        handleAuthError(handleLogout, 'Failed to increment quota: Unauthorized.');
-      } else {
-        logger.error('Failed to increment quota on backend', response.statusText);
-      }
-    } catch (error) {
-      console.error('Error incrementing quota:', error);
-    }
-  }, [handleAuthError, handleLogout]);
-
-  // A retry is practice only: it never costs quota and never moves the rating.
-  const handleQuestionComplete = useCallback(({ question, classification, isRetry }: { question: Question, classification: AnswerOutcome, isRetry?: boolean }): RatingResult => {
+  // A retry is practice only: it never moves the rating. The server charges the question when it grades the
+  // answer and sends back the new numbers, so the app only has to show them.
+  const handleQuestionComplete = useCallback(({ question, classification, isRetry, quota }: { question: Question, classification: AnswerOutcome, isRetry?: boolean, quota?: { questionsUsed: number; bonusQuestions: number } }): RatingResult => {
     const before = skills.find(skill => skill.id === question.skillId)?.rating ?? 0;
+    if (quota) setAuthQuota(prev => ({ ...prev, questionsUsed: quota.questionsUsed, bonusQuestions: quota.bonusQuestions }));
     if (isRetry) return { before, after: before };
 
-    // Deduct from quota if it's the first time this question is being engaged with in this session
+    // Remember which questions were answered, so the ones left over can be saved when the session ends.
     if (isAuthenticated && practiceSession && !practiceSession.consumedQuestionIds.has(question.id)) {
         setPracticeSession(prevSession => {
             if (!prevSession) return null;
@@ -430,14 +432,13 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
             newConsumedIds.add(question.id);
             return { ...prevSession, consumedQuestionIds: newConsumedIds };
         });
-        void spendQuota();
     }
 
     // The change depends on the level the question was asked at, and each level has a ceiling.
     const after = updateRating(before, classification, question.level);
     setSkills(prevSkills => prevSkills.map(skill => skill.id === question.skillId ? { ...skill, rating: after } : skill));
     return { before, after };
-  }, [skills, isAuthenticated, practiceSession, spendQuota, setPracticeSession, setSkills]);
+  }, [skills, isAuthenticated, practiceSession, setAuthQuota, setPracticeSession, setSkills]);
 
   // One tap start: the recommended level and a short session, so there is nothing to decide first.
   const handleQuickStart = useCallback((skill: Skill, level: ExperienceLevel = recommendedLevel(skill.rating)) => {
@@ -507,8 +508,22 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
     return () => { cancelled = true; };
   }, [isAuthenticated, isOnHome]);
 
+  // Shown wherever a guest is asked to sign in.
+  const signInButton = (
+    <GoogleLogin
+      onSuccess={handleLoginSuccess}
+      onError={() => {
+        logger.error('Google Login Failed.');
+        alert('Google login failed. Please try again.');
+      }}
+      theme="filled_black"
+      text="signin_with"
+      shape="pill"
+    />
+  );
+
   if (practiceSession) {
-    return <PracticeView session={practiceSession} onEndSession={endPracticeSession} onNavigate={navigateQuestion} onQuestionComplete={handleQuestionComplete} onPracticeAgain={handlePracticeAgain} questionsRemaining={questionsRemaining} isAuthenticated={isAuthenticated} />;
+    return <PracticeView session={practiceSession} onEndSession={endPracticeSession} onNavigate={navigateQuestion} onQuestionComplete={handleQuestionComplete} onPracticeAgain={handlePracticeAgain} questionsRemaining={questionsRemaining} isAuthenticated={isAuthenticated} signInButton={isAuthEnabled ? signInButton : null} />;
   }
 
   return (
@@ -524,6 +539,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
         onPurchaseQuestions={handlePurchaseQuestions}
         onOpenWelcomeModal={() => setIsWelcomeModalOpen(true)}
         onOpenProgress={() => setIsProgressOpen(true)}
+        onOpenRedeem={() => setRedeem(prev => ({ ...prev, isOpen: true }))}
         streak={insights ? { current: insights.totals.currentStreak, practicedToday: insights.totals.practicedToday } : null}
         setShowPurchaseModal={setShowPurchaseModal}
       />
@@ -583,21 +599,22 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
           onClose={() => setLimitModal({ isOpen: false, reason: null })}
           onUpgrade={handlePurchaseQuestions}
           // Render GoogleLogin component directly within the modal for convenience
-          googleLoginComponent={(
-            <GoogleLogin
-              onSuccess={handleLoginSuccess}
-              onError={() => {
-                logger.error('Google Login Failed from LimitReachedModal.');
-                alert('Google login failed. Please try again.');
-              }}
-              theme="filled_black"
-              text="signin_with"
-              shape="pill"
-            />
-          )}
+          googleLoginComponent={signInButton}
         />
       )}
       {isWelcomeModalOpen && <WelcomeModal onClose={() => setIsWelcomeModalOpen(false)} />}
+      {redeem.isOpen && (
+        <RedeemCodeModal
+          isAuthenticated={isAuthenticated}
+          initialCode={redeem.code}
+          signInButton={isAuthEnabled ? signInButton : null}
+          onClose={() => setRedeem({ isOpen: false, code: '' })}
+          onRedeemed={(added, bonusQuestions) => {
+            setAuthQuota(prev => ({ ...prev, bonusQuestions }));
+            setToastMessage(`${added} bonus questions added!`);
+          }}
+        />
+      )}
       {isProgressOpen && isAuthenticated && (
         <ProgressModal onClose={() => setIsProgressOpen(false)} />
       )}
