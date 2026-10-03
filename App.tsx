@@ -22,7 +22,7 @@ import { readErrorMessage } from './services/gemini';
 import ProgressModal from './components/ProgressModal';
 import Footer from './components/Footer';
 import { fetchInsights } from './services/progress';
-import { defaultQuestionCount, recommendedLevel } from './utils/practiceDefaults';
+import { GUEST_MAX_QUESTIONS, defaultQuestionCount, recommendedLevel } from './utils/practiceDefaults';
 
 
 // Helper to shuffle array
@@ -219,6 +219,7 @@ const AppContent: React.FC<{ isAuthEnabled: boolean }> = ({ isAuthEnabled }) => 
       setLimitModal({ isOpen: true, reason: 'sessions' });
       return;
     }
+    if (!isAuthenticated) count = Math.min(count, GUEST_MAX_QUESTIONS);
 
     if (isAuthenticated && !localStorage.getItem('google_id_token')) {
       logger.warn('Authenticated user but no Google ID token found in localStorage. Please log in again.');

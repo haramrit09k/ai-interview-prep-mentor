@@ -2,6 +2,8 @@ import type { ExperienceLevel } from '../types';
 import { RATING_CEILING, isAtCeiling } from './rating';
 
 export const DEFAULT_QUESTION_COUNT = 5;
+// Guests can try one short round per free session. Longer rounds need a sign in.
+export const GUEST_MAX_QUESTIONS = 5;
 
 // Chip colours follow the green, amber and red people know from problem difficulty tags.
 export const LEVEL_STYLE: Record<ExperienceLevel, { short: string; text: string; border: string; blurb: string }> = {

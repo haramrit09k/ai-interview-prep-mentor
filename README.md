@@ -20,7 +20,7 @@ I built it to learn how the pieces of a small paid web product fit together: log
 - Keeps a skill rating that moves with your answers (+10 correct, +5 partial, -5 wrong or "I don't know")
 - Saves questions you didn't get to, and serves them first next time
 - A Review button on every skill opens a study sheet built from your whole history: the questions worth another try (with a one-click "practise these" session), concepts you keep missing, concepts you have mastered, and how that skill is trending
-- Works as a guest (2 skills, 2 sessions); signing in with Google unlocks 5 skills and 50 questions a week
+- Works as a guest (2 skills, 2 sessions of 5 questions each); signing in with Google unlocks 5 skills and 50 questions a week
 - Sells extra question packs through Stripe Checkout
 
 ## How it works
